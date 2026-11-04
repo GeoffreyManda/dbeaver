@@ -508,6 +508,13 @@ public final class WorkbenchSourceTools {
         if (Files.isRegularFile(javac) && Files.isExecutable(javac)) {
             return new ArrayList<>(List.of(javac.toString(), "--release", "21", "-J-Xmx128m"));
         }
+        String configuredHome = System.getenv("JAVA_HOME");
+        if (configuredHome != null && !configuredHome.isBlank()) {
+            Path configuredJavac = Path.of(configuredHome).resolve("bin/javac" + suffix);
+            if (configuredJavac.isAbsolute() && Files.isRegularFile(configuredJavac) && Files.isExecutable(configuredJavac)) {
+                return new ArrayList<>(List.of(configuredJavac.toString(), "--release", "21", "-J-Xmx128m"));
+            }
+        }
         Path ecj = Path.of(System.getProperty("user.home"), ".m2", "repository", "org", "eclipse", "jdt", "ecj",
             ECJ_VERSION, "ecj-" + ECJ_VERSION + ".jar");
         if (!Files.isRegularFile(ecj, LinkOption.NOFOLLOW_LINKS) || Files.size(ecj) > 4 * 1024 * 1024
