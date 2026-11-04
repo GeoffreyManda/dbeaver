@@ -5,7 +5,9 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.IStructuredSelection;
+import org.eclipse.ui.commands.ICommandService;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
@@ -19,7 +21,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-/** Explicit native destinations; never executes a model-supplied command ID. */
+/** Native destinations and confirmed execution of registered DBeaver commands. */
 public final class WorkbenchNavigationFunction implements AIFunction {
     private static final String ER_DIAGRAM = "er-diagram";
     private static final String VIEW_DIAGRAM = "org.jkiss.dbeaver.erd.diagram.view";
@@ -35,11 +37,12 @@ public final class WorkbenchNavigationFunction implements AIFunction {
         @NotNull AIFunctionContext context,
         @NotNull Map<String, Object> parameters
     ) throws DBException {
+        Object commandId = parameters.get("commandId");
         Object value = parameters.get("destination");
         if (!(value instanceof String destination) ||
             !(VIEWS.containsKey(destination) || destination.equals("preferences")
-                || destination.equals("new-connection") || destination.equals(ER_DIAGRAM))) {
-            throw new DBException("Choose database-navigator, project-explorer, ai-workbench, preferences, new-connection or er-diagram");
+                || destination.equals("new-connection") || destination.equals(ER_DIAGRAM) || destination.equals("registered-command"))) {
+            throw new DBException("Choose a destination listed in the tool schema");
         }
         CompletableFuture<String> future = new CompletableFuture<>();
         Runnable action = () -> {
@@ -55,6 +58,42 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                 if (VIEWS.containsKey(destination)) {
                     window.getActivePage().showView(VIEWS.get(destination));
                     future.complete("Opened " + destination.replace('-', ' ') + ".");
+                } else if (destination.equals("registered-command")) {
+                    if (!(commandId instanceof String id) || !id.matches("org\\.jkiss\\.dbeaver\\.[A-Za-z0-9_.-]{1,100}")) {
+                        throw new DBException("Supply an exact DBeaver command ID from capability search");
+                    }
+                    var commands = window.getService(ICommandService.class);
+                    var handlers = window.getService(IHandlerService.class);
+                    if (commands == null || handlers == null) {
+                        throw new DBException("Native command service unavailable");
+                    }
+                    var command = commands.getCommand(id);
+                    if (!command.isDefined() || !command.isHandled() || !command.isEnabled()
+                        || command.getParameters() != null && command.getParameters().length != 0) {
+                        throw new DBException("The command is unavailable in the current selection or needs a dedicated parameter adapter");
+                    }
+                    var page = window.getActivePage();
+                    var part = page.getActivePart();
+                    var selection = window.getSelectionService().getSelection();
+                    String label = command.getName();
+                    UIUtils.asyncExec(() -> {
+                        if (window.getShell().isDisposed() || !MessageDialog.openConfirm(window.getShell(),
+                            "Run DBeaver command", label + "\n" + id + "\n\nRun against the current workbench selection?")) {
+                            return;
+                        }
+                        try {
+                            if (window.getActivePage() != page || page.getActivePart() != part
+                                || !java.util.Objects.equals(selection, window.getSelectionService().getSelection())
+                                || !command.isEnabled()) {
+                                throw new DBException("The workbench context changed. Request the command again.");
+                            }
+                            handlers.executeCommand(id, null);
+                        } catch (Exception e) {
+                            org.jkiss.dbeaver.runtime.DBWorkbench.getPlatformUI().showError(
+                                "Command failed", "Could not run " + label, e);
+                        }
+                    });
+                    future.complete("Requested confirmation for " + label + ". Wait for the user and observe the result.");
                 } else if (destination.equals(ER_DIAGRAM)) {
                     var page = window.getActivePage();
                     String navigatorId = VIEWS.get("database-navigator");
