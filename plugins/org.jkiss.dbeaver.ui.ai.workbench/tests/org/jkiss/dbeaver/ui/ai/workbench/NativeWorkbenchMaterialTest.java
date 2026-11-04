@@ -52,6 +52,10 @@ public final class NativeWorkbenchMaterialTest {
         }
         check(NativeWorkbenchMaterial.surfaceClassAllowed("WebView"), "Installed legacy WebView background target");
         verifyBrowserTraversal();
+        var alpha = NativeWorkbenchMaterial.alphaSummary(List.of(0, 5, 128, 255, 255));
+        check(alpha.get("transparent") == 1 && alpha.get("translucent") == 2 && alpha.get("opaque") == 2,
+            "Alpha diagnostics distinguish opaque native owners without exposing content");
+        check(NativeWorkbenchMaterial.alphaSummary(List.of()).get("opaque") == 0, "Empty alpha observations");
         check(!NativeWorkbenchMaterial.surfaceClassAllowed("NSView"), "Generic native views are not background targets");
         check(!NativeWorkbenchMaterial.surfaceClassAllowed(null), "Unknown native surface class rejected");
         check(!NativeWorkbenchMaterial.prepareControl(null), "No background operation without a native control");

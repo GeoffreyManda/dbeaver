@@ -20,6 +20,7 @@ package org.jkiss.dbeaver.ui.ai.workbench;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
 import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.DisposeListener;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.widgets.Control;
@@ -470,7 +471,63 @@ public final class NativeWorkbenchMaterial {
         result.put("windows", TARGETS.size());
         result.put("regions", REGIONS.size());
         result.put("nativeBackgroundViews", SURFACES.size());
+        Map<String, Integer> kinds = new LinkedHashMap<>();
+        int drawingStillEnabled = 0;
+        int drawingDisabled = 0;
+        int observationFailures = 0;
+        for (Surface surface : SURFACES.values()) {
+            kinds.merge(surface.kind(), 1, Integer::sum);
+            if (bridge != null && surface.booleans().containsKey("drawsBackground")) {
+                try {
+                    if (bridge.drawingBackground(surface)) {
+                        drawingStillEnabled++;
+                    } else {
+                        drawingDisabled++;
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    observationFailures++;
+                }
+            }
+        }
+        result.put("retainedSurfaceKinds", Map.copyOf(kinds));
+        result.put("observedDrawsBackgroundTrue", drawingStillEnabled);
+        result.put("observedDrawsBackgroundFalse", drawingDisabled);
+        result.put("backgroundObservationFailures", observationFailures);
+        result.put("ownerBackgroundAlpha", ownerAlphaSummary(SURFACE_OWNERS.keySet()));
         return Map.copyOf(result);
+    }
+
+    @NotNull
+    static Map<String, Integer> alphaSummary(@NotNull List<Integer> alphas) {
+        int transparent = 0;
+        int translucent = 0;
+        int opaque = 0;
+        for (int alpha : alphas) {
+            if (alpha == 0) {
+                transparent++;
+            } else if (alpha > 0 && alpha < 255) {
+                translucent++;
+            } else if (alpha == 255) {
+                opaque++;
+            }
+        }
+        return Map.of("transparent", transparent, "translucent", translucent, "opaque", opaque);
+    }
+
+    @NotNull
+    private static Map<String, Object> ownerAlphaSummary(@NotNull Set<Control> controls) {
+        List<Integer> nativeAlphas = new ArrayList<>();
+        List<Integer> editorAlphas = new ArrayList<>();
+        for (Control control : controls) {
+            if (!control.isDisposed()) {
+                int alpha = control.getBackground().getAlpha();
+                nativeAlphas.add(alpha);
+                if (control instanceof StyledText) {
+                    editorAlphas.add(alpha);
+                }
+            }
+        }
+        return Map.of("allRetainedOwners", alphaSummary(nativeAlphas), "styledTextOwners", alphaSummary(editorAlphas));
     }
 
     private static final class Target {
@@ -503,7 +560,7 @@ public final class NativeWorkbenchMaterial {
     }
 
     private record Surface(long id, long originalColor, boolean hasColor, @NotNull String colorSetter,
-        @NotNull Map<String, Boolean> booleans, @NotNull Control owner, @NotNull Shell shell) {
+        @NotNull String kind, @NotNull Map<String, Boolean> booleans, @NotNull Control owner, @NotNull Shell shell) {
     }
 
     private record Layer(@Nullable Object view, @NotNull Object window, @NotNull Object background, boolean opaque) {
@@ -762,7 +819,8 @@ public final class NativeWorkbenchMaterial {
                 return null;
             }
             long originalColor = hasColor ? message(view, colorGetter) : 0;
-            Surface surface = new Surface(view, originalColor, hasColor, colorSetter, Map.copyOf(original), owner, owner.getShell());
+            Surface surface = new Surface(view, originalColor, hasColor, colorSetter, surfaceKind(view),
+                Map.copyOf(original), owner, owner.getShell());
             message(view, "retain");
             if (originalColor != 0) {
                 message(originalColor, "retain");
@@ -774,6 +832,22 @@ public final class NativeWorkbenchMaterial {
                 restoreSurface(surface);
                 throw e;
             }
+        }
+
+        @NotNull
+        private String surfaceKind(long view) throws ReflectiveOperationException {
+            // Most-specific browser types first; output never includes arbitrary native class names.
+            for (String type : List.of("WKWebView", "WebView", "NSOutlineView", "NSTableView", "NSTextView",
+                "NSTextField", "NSScrollView", "NSClipView")) {
+                if (kind(view, type)) {
+                    return type;
+                }
+            }
+            return "unknown";
+        }
+
+        private boolean drawingBackground(@NotNull Surface surface) throws ReflectiveOperationException {
+            return (Boolean) sendBoolean.invoke(null, surface.id(), selector("drawsBackground"));
         }
 
         /** Reassert the material after SWT background updates, without recapturing or retaining original state. */

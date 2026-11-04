@@ -301,6 +301,8 @@ public final class WorkbenchAppearance {
             : color(activePalette.chrome());
         if (control instanceof CTabFolder folder) {
             rememberTabItems(folder);
+            // Gradients style the headers; the body renderer reads the actual control background alpha.
+            folder.setBackground(background);
             folder.setBackground(new Color[] {background, background},
                 new int[] {100}, true);
             folder.setForeground(color(activePalette.chromeForeground()));

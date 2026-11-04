@@ -5,7 +5,9 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.ImageData;
+import org.eclipse.swt.graphics.ImageLoader;
 import org.eclipse.swt.graphics.PaletteData;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.model.ai.AIFunctionCall;
@@ -18,6 +20,10 @@ import org.jkiss.dbeaver.model.ai.AIVisualToolOutput;
 import org.jkiss.dbeaver.model.ai.engine.openai.dto.OAIMessageFactory;
 import org.jkiss.dbeaver.model.data.json.JSONUtils;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +31,17 @@ import java.util.Map;
 /** Exercises actual image encoding and OpenAI multimodal DTOs without capturing a desktop or writing files. */
 public final class WorkbenchVisualCaptureTest {
     public static void main(@NotNull String[] arguments) throws Exception {
+        String failure = WorkbenchVisualCapture.captureFailure("PNG decode",
+            new InvocationTargetException(new IOException("Invalid /Users/private/source.png\nimage")));
+        check(failure.contains("PNG decode: IOException") && !failure.contains("/Users") && !failure.contains("\n"),
+            "Capture failures must unwrap their cause and remove paths and control characters");
+        if ("cocoa".equals(SWT.getPlatform())) {
+            Class<?> os = Class.forName("org.eclipse.swt.internal.cocoa.OS");
+            os.getMethod("objc_msgSend", long.class, long.class, long.class, long.class);
+            os.getMethod("objc_msgSend_bool", long.class, long.class, long.class);
+            os.getMethod("objc_getClass", String.class);
+            Class.forName("org.eclipse.swt.internal.cocoa.NSData").getMethod("getBytes", byte[].class);
+        }
         int[] fit = WorkbenchVisualCapture.fit(3200, 1800);
         check(fit[0] == 1600 && fit[1] == 900, "Capture must downsample within its edge bound");
         expectInvalid(() -> WorkbenchVisualCapture.fit(0, 10));
@@ -37,7 +54,15 @@ public final class WorkbenchVisualCaptureTest {
             }
         }
         check(WorkbenchVisualCapture.hasVisualDetail(image), "Actual image structure should survive capture checks");
-        byte[] encoded = WorkbenchVisualCapture.encode(image);
+        image.alpha = 255;
+        ImageLoader png = new ImageLoader();
+        png.data = new ImageData[] {image};
+        ByteArrayOutputStream pngBytes = new ByteArrayOutputStream();
+        png.save(pngBytes, SWT.IMAGE_PNG);
+        ImageData decoded = new ImageData(new ByteArrayInputStream(pngBytes.toByteArray()));
+        check(decoded.width == 48 && decoded.height == 48 && WorkbenchVisualCapture.hasVisualDetail(decoded),
+            "RGBA PNG must decode in memory before bounded JPEG conversion");
+        byte[] encoded = WorkbenchVisualCapture.encode(decoded);
         check(encoded.length <= AIVisualToolOutput.MAX_BYTES, "Encoded image exceeds output budget");
         AIImageAttachment attachment = AIImageAttachment.fromBytes("fixture.jpg", encoded);
         AIVisualToolOutput visual = new AIVisualToolOutput("Fixture window observation", attachment);

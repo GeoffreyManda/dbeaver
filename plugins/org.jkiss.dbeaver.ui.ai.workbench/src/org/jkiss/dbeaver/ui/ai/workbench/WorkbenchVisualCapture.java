@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 
 /** Captures only the foreground workbench window region after the normal tool confirmation. */
 final class WorkbenchVisualCapture {
@@ -81,42 +82,81 @@ final class WorkbenchVisualCapture {
     /** Public AppKit view rendering captures only our own window without screen-recording access. */
     @NotNull
     private static ImageData captureCocoa(@NotNull Shell shell) throws IOException {
+        String stage = "native API discovery";
         try {
             ClassLoader loader = Control.class.getClassLoader();
             Class<?> viewClass = Class.forName("org.eclipse.swt.internal.cocoa.NSView", true, loader);
-            Class<?> rectangleClass = Class.forName("org.eclipse.swt.internal.cocoa.NSRect", true, loader);
-            Class<?> bitmapClass = Class.forName("org.eclipse.swt.internal.cocoa.NSBitmapImageRep", true, loader);
+            final Class<?> rectangleClass = Class.forName("org.eclipse.swt.internal.cocoa.NSRect", true, loader);
+            final Class<?> bitmapClass = Class.forName("org.eclipse.swt.internal.cocoa.NSBitmapImageRep", true, loader);
             final Class<?> dataClass = Class.forName("org.eclipse.swt.internal.cocoa.NSData", true, loader);
             final Class<?> osClass = Class.forName("org.eclipse.swt.internal.cocoa.OS", true, loader);
+            stage = "own-view lookup";
             Object view = Control.class.getField("view").get(shell);
             viewClass.getMethod("displayIfNeeded").invoke(view);
             Object rectangle = viewClass.getMethod("bounds").invoke(view);
+            stage = "bitmap allocation";
             Object bitmap = viewClass.getMethod("bitmapImageRepForCachingDisplayInRect", rectangleClass).invoke(view, rectangle);
             if (bitmap == null) {
                 throw new IOException("AppKit cannot allocate a snapshot of this DBeaver view");
             }
+            stage = "view rendering";
             viewClass.getMethod("cacheDisplayInRect", rectangleClass, bitmapClass).invoke(view, rectangle, bitmap);
-            long selector = ((Number) osClass.getMethod("sel_registerName", String.class)
-                .invoke(null, "TIFFRepresentation")).longValue();
+            stage = "PNG representation";
+            var selectorMethod = osClass.getMethod("sel_registerName", String.class);
+            var send = osClass.getMethod("objc_msgSend", long.class, long.class);
+            var sendTwo = osClass.getMethod("objc_msgSend", long.class, long.class, long.class, long.class);
+            long selector = ((Number) selectorMethod.invoke(null, "representationUsingType:properties:")).longValue();
             long bitmapId = bitmapClass.getField("id").getLong(bitmap);
-            long dataId = ((Number) osClass.getMethod("objc_msgSend", long.class, long.class)
-                .invoke(null, bitmapId, selector)).longValue();
+            long responds = ((Number) selectorMethod.invoke(null, "respondsToSelector:")).longValue();
+            boolean supported = (Boolean) osClass.getMethod("objc_msgSend_bool", long.class, long.class, long.class)
+                .invoke(null, bitmapId, responds, selector);
+            if (!supported) {
+                throw new IOException("Public AppKit PNG representation is unavailable");
+            }
+            long dictionaryClass = ((Number) osClass.getMethod("objc_getClass", String.class)
+                .invoke(null, "NSDictionary")).longValue();
+            long dictionarySelector = ((Number) selectorMethod.invoke(null, "dictionary")).longValue();
+            long properties = ((Number) send.invoke(null, dictionaryClass, dictionarySelector)).longValue();
+            if (properties == 0) {
+                throw new IOException("AppKit PNG properties dictionary is unavailable");
+            }
+            // NSBitmapImageFileTypePNG is the public AppKit enumeration value 4.
+            long dataId = ((Number) sendTwo.invoke(null, bitmapId, selector, 4L, properties)).longValue();
             if (dataId == 0) {
-                throw new IOException("AppKit returned no snapshot image data");
+                throw new IOException("AppKit returned no PNG snapshot image data");
             }
             Object nativeData = dataClass.getConstructor(long.class).newInstance(dataId);
+            stage = "native byte budget";
             long length = ((Number) dataClass.getMethod("length").invoke(nativeData)).longValue();
             if (length <= 0 || length > 64L * 1024 * 1024) {
                 throw new IOException("AppKit snapshot exceeds the in-memory capture budget");
             }
             byte[] bytes = new byte[(int) length];
             dataClass.getMethod("getBytes", byte[].class).invoke(nativeData, (Object) bytes);
+            stage = "PNG decode";
             ImageData image = new ImageData(new ByteArrayInputStream(bytes));
+            stage = "decoded pixel budget";
             fit(image.width, image.height);
             return image;
-        } catch (ReflectiveOperationException | RuntimeException error) {
-            throw new IOException("AppKit own-window capture failed; no screenshot was shared", error);
+        } catch (ReflectiveOperationException | RuntimeException | IOException error) {
+            throw new IOException(captureFailure(stage, error), error);
         }
+    }
+
+    @NotNull
+    static String captureFailure(@NotNull String stage, @NotNull Throwable failure) {
+        Throwable cause = failure;
+        while (cause instanceof InvocationTargetException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage() == null ? "No detail" : cause.getMessage();
+        message = message.replaceAll("(?:[A-Za-z]:)?[/\\\\][^\\s]*", "[path]")
+            .replaceAll("[\\p{Cntrl}]", " ").replaceAll("\\s+", " ").trim();
+        if (message.length() > 160) {
+            message = message.substring(0, 160);
+        }
+        return "AppKit capture failed at " + stage + ": " + cause.getClass().getSimpleName()
+            + " (" + message + "); no screenshot was shared";
     }
 
     @NotNull
