@@ -51,8 +51,9 @@ def main():
         for test in tests:
             name = ".".join(test.relative_to(bundle / "tests").with_suffix("").parts)
             run([java, "-ea", "-Ddbeaver.workbench.onlineTests=" + str(args.online_test).lower(),
-                 "-classpath", os.pathsep.join([str(classes), str(test_classes), classpath]), name])
-        artifact = bundle / "target/org.jkiss.dbeaver.ui.ai.workbench_0.1.2.jar"
+                 "-classpath", os.pathsep.join([str(classes), str(test_classes), str(bundle), classpath]), name])
+        version = next(line.split(": ", 1)[1].removesuffix(".qualifier") for line in (bundle / "META-INF/MANIFEST.MF").read_text().splitlines() if line.startswith("Bundle-Version: "))
+        artifact = bundle / f"target/org.jkiss.dbeaver.ui.ai.workbench_{version}.jar"
         artifact.parent.mkdir(exist_ok=True)
         with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as output:
             for name in ("META-INF/MANIFEST.MF", "plugin.xml", "plugin.properties"):

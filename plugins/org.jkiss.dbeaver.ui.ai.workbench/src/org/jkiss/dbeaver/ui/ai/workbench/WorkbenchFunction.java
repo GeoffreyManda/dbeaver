@@ -17,7 +17,6 @@
 
 package org.jkiss.dbeaver.ui.ai.workbench;
 
-import com.google.gson.Gson;
 import org.eclipse.swt.widgets.Display;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
@@ -27,7 +26,6 @@ import org.jkiss.dbeaver.model.ai.AIFunctionResult;
 import org.jkiss.dbeaver.model.ai.AIFunctionType;
 import org.jkiss.dbeaver.ui.UIUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -37,7 +35,7 @@ abstract class WorkbenchFunction implements AIFunction {
     private static final int UI_TIMEOUT_SECONDS = 10;
     private final Operation operation;
 
-    enum Operation { OBSERVE, ACTIVATE, PRESENTATION, CATALOG }
+    enum Operation { OBSERVE, ACTIVATE, PRESENTATION, CATALOG, APPEARANCE }
 
     WorkbenchFunction(Operation operation) {
         this.operation = operation;
@@ -50,10 +48,11 @@ abstract class WorkbenchFunction implements AIFunction {
         if (context.getMonitor().isCanceled()) {
             throw new DBException("Workbench operation canceled");
         }
-        boolean displayAction = operation == Operation.ACTIVATE || operation == Operation.PRESENTATION;
-        String snapshotId = displayAction ? parameter(parameters, "snapshotId") : "";
-        String nodeId = displayAction ? parameter(parameters, "nodeId") : "";
+        boolean targetedAction = operation == Operation.ACTIVATE || operation == Operation.PRESENTATION;
+        String snapshotId = targetedAction ? parameter(parameters, "snapshotId") : "";
+        String nodeId = targetedAction ? parameter(parameters, "nodeId") : "";
         String query = operation == Operation.CATALOG ? parameter(parameters, "query") : "";
+        String accent = operation == Operation.APPEARANCE ? parameter(parameters, "accent") : "";
         CompletableFuture<Map<String, Object>> future = new CompletableFuture<>();
         Runnable action = () -> {
             // A timed-out queued request must never execute later.
@@ -65,6 +64,7 @@ abstract class WorkbenchFunction implements AIFunction {
                 future.complete(switch (operation) {
                     case OBSERVE -> WorkbenchTools.observe();
                     case CATALOG -> NativeCapabilityCatalog.query(query);
+                    case APPEARANCE -> WorkbenchAppearance.apply(accent);
                     case ACTIVATE, PRESENTATION -> WorkbenchTools.act(snapshotId, nodeId,
                         operation == Operation.PRESENTATION);
                 });
@@ -82,12 +82,25 @@ abstract class WorkbenchFunction implements AIFunction {
             display.asyncExec(action);
         }
         try {
-            String json = new Gson().toJson(future.get(UI_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-            if (json.getBytes(StandardCharsets.UTF_8).length > 32 * 1024) {
-                throw new DBException("Workbench observation exceeds response limit");
+            var result = future.get(UI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (operation == Operation.APPEARANCE) {
+                String applied = String.valueOf(result.get("accent"));
+                String message = "default".equals(applied) ? "Restored the original app colors."
+                    : "Applied " + ("#2563EB".equals(applied) ? "blue"
+                        : "#FF0000".equals(applied) ? "red"
+                        : "#008000".equals(applied) ? "green"
+                        : "#FFD700".equals(applied) ? "gold" : applied)
+                        + " across the native interface.";
+                return new AIFunctionResult(AIFunctionType.ACTION, message);
             }
-            return new AIFunctionResult(displayAction ? AIFunctionType.ACTION : AIFunctionType.INFORMATION,
-                json);
+            var response = WorkbenchResponse.serialize(result);
+            if (response.snapshotId() != null) {
+                WorkbenchTools.disclose(response.snapshotId(), response.disclosedNodes());
+            }
+            // ACTION results terminate upstream chat with their raw value. Return tool
+            // evidence for a normal, localized assistant reply after the action.
+            return new AIFunctionResult(AIFunctionType.INFORMATION,
+                response.json());
         } catch (InterruptedException e) {
             future.cancel(false);
             Thread.currentThread().interrupt();

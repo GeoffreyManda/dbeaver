@@ -18,6 +18,7 @@
 package org.jkiss.dbeaver.ui.ai.workbench;
 
 import org.eclipse.jface.viewers.SelectionChangedEvent;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPartReference;
@@ -35,13 +36,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /** Native display operations. Access only from the SWT display thread. */
 final class WorkbenchTools {
     private static final int MAX_PARTS = 64;
     private static final int MAX_PRESENTATIONS = 16;
     private static final Duration MAX_AGE = Duration.ofMinutes(2);
-    private static Observation observation;
+    private static volatile Observation observation;
+    private static volatile Disclosure disclosure;
 
     private WorkbenchTools() {
     }
@@ -89,10 +92,11 @@ final class WorkbenchTools {
                 }
             }
         }
+        NativeSceneInspector.append(graph);
         var snapshot = graph.build();
         observation = new Observation(snapshot.id().toString(), snapshot.observedAt(), page, editor,
             result, result == null ? -1 : result.getModel().getRowCount(), parts, presentations,
-            new Invalidator(snapshot.id().toString()));
+            new Invalidator(snapshot.id().toString()), UIUtils.getDisplay());
         if (result != null) {
             result.addListener(observation.listener());
         }
@@ -104,7 +108,7 @@ final class WorkbenchTools {
         });
         return Map.of("snapshotId", snapshot.id().toString(), "observedAt", snapshot.observedAt().toString(),
             "nodes", snapshot.nodes(), "edges", snapshot.edges(), "truncated", snapshot.truncated(),
-            "coverage", "active-page parts and fetched-result metadata; cell content and other windows unknown");
+            "coverage", "active page, visible native shells/controls and fetched metadata; browser DOM and cell content unobserved");
     }
 
     private static void addParts(WorkbenchSceneGraph.Builder graph,
@@ -132,7 +136,9 @@ final class WorkbenchTools {
     static Map<String, Object> act(@NotNull String snapshotId, @NotNull String nodeId,
         boolean presentation) throws DBException {
         Observation state = observation;
+        Disclosure visible = disclosure;
         if (state == null || !state.id().equals(snapshotId)
+            || visible == null || !visible.id().equals(snapshotId) || !visible.nodes().contains(nodeId)
             || Duration.between(state.time(), Instant.now()).compareTo(MAX_AGE) > 0
             || UIUtils.getActiveWorkbenchWindow() == null
             || UIUtils.getActiveWorkbenchWindow().getActivePage() != state.page()
@@ -164,9 +170,30 @@ final class WorkbenchTools {
         return observe();
     }
 
+    static void disclose(String id, Set<String> nodes) {
+        Observation state = observation;
+        if (state != null && state.id().equals(id)) {
+            disclosure = new Disclosure(id, Set.copyOf(nodes));
+        }
+    }
+
+    private record Disclosure(String id, Set<String> nodes) {
+    }
+
+    static void dispose() {
+        disclosure = null;
+        Observation state = observation;
+        if (state != null && !state.display().isDisposed()) {
+            state.display().asyncExec(WorkbenchTools::clearObservation);
+        } else {
+            observation = null;
+        }
+    }
+
     private static void clearObservation() {
         Observation old = observation;
         observation = null;
+        disclosure = null;
         if (old != null && old.result() != null && !old.result().getControl().isDisposed()) {
             old.result().removeListener(old.listener());
         }
@@ -183,6 +210,7 @@ final class WorkbenchTools {
             if (observation != null && observation.id().equals(id)) {
                 Observation old = observation;
                 observation = null;
+                disclosure = null;
                 // Some viewer events iterate the live listener list; detach after dispatch.
                 UIUtils.asyncExec(() -> {
                     if (old.result() != null && !old.result().getControl().isDisposed()) {
@@ -207,6 +235,6 @@ final class WorkbenchTools {
 
     private record Observation(String id, Instant time, IWorkbenchPage page, IEditorPart editor,
         IResultSetController result, int rows, Map<String, IWorkbenchPartReference> parts,
-        Map<String, ResultSetPresentationDescriptor> presentations, IResultSetListener listener) {
+        Map<String, ResultSetPresentationDescriptor> presentations, IResultSetListener listener, Display display) {
     }
 }

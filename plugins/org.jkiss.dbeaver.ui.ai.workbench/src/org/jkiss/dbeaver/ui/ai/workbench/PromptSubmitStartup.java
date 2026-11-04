@@ -18,44 +18,126 @@
 package org.jkiss.dbeaver.ui.ai.workbench;
 
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.DisposeListener;
+import org.eclipse.swt.events.PaintListener;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Listener;
 import org.eclipse.ui.IStartup;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.ai.chat.controls.AIChatControl;
 import org.jkiss.dbeaver.ui.ai.chat.controls.AIPromptStyledText;
 import org.jkiss.dbeaver.ui.ai.chat.controls.PromptComposite;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.ResourceBundle;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Enter sends only from the AI prompt; normal editor and IME keys are untouched. */
 public final class PromptSubmitStartup implements IStartup {
-    private static final AtomicBoolean INSTALLED = new AtomicBoolean();
+    private static final AtomicLong GENERATION = new AtomicLong();
+    private static final int MAX_HINTS = 64;
     private static final String HINT_KEY = "org.jkiss.dbeaver.ui.ai.workbench.promptHint";
+    private static final Map<AIPromptStyledText, HintState> HINTS = new LinkedHashMap<>();
+    private static volatile Display installedDisplay;
+    private static long installedGeneration;
+    private static Listener keyFilter;
+    private static Listener focusFilter;
 
     @Override
     public void earlyStartup() {
+        long generation = GENERATION.get();
         UIUtils.asyncExec(() -> {
-            if (!INSTALLED.compareAndSet(false, true)) {
+            if (generation != GENERATION.get()
+                || installedDisplay != null && installedGeneration == generation) {
                 return;
             }
+            if (installedDisplay != null) {
+                removeHooks(installedDisplay);
+            }
             Display display = UIUtils.getDisplay();
-            display.addFilter(SWT.KeyDown, this::keyDown);
-            display.addFilter(SWT.FocusIn, event -> {
+            if (display.isDisposed()) {
+                return;
+            }
+            keyFilter = PromptSubmitStartup::keyDown;
+            focusFilter = event -> {
                 if (event.widget instanceof AIPromptStyledText prompt) {
                     installHint(prompt);
                 }
-            });
+            };
+            display.addFilter(SWT.KeyDown, keyFilter);
+            display.addFilter(SWT.FocusIn, focusFilter);
+            installedGeneration = generation;
+            installedDisplay = display;
             for (var shell : display.getShells()) {
                 installExistingHints(shell, 0);
+            }
+            // Stop can arrive while startup is traversing controls on the display thread.
+            if (generation != GENERATION.get()) {
+                removeHooks(display);
             }
         });
     }
 
-    private void keyDown(Event event) {
+    /** Detaches only this lifecycle's hooks; does not initialize an unused UI. */
+    public static void uninstall() {
+        long generation = GENERATION.incrementAndGet();
+        Display display = installedDisplay;
+        if (display == null) {
+            return;
+        }
+        if (display.isDisposed()) {
+            removeHooks(display);
+            return;
+        }
+        try {
+            display.asyncExec(() -> {
+                if (installedDisplay == display && installedGeneration < generation) {
+                    removeHooks(display);
+                }
+            });
+        } catch (org.eclipse.swt.SWTException e) {
+            if (!display.isDisposed()) {
+                throw e;
+            }
+            removeHooks(display);
+        }
+    }
+
+    private static void removeHooks(Display display) {
+        if (installedDisplay != display) {
+            return;
+        }
+        if (!display.isDisposed()) {
+            if (keyFilter != null) {
+                display.removeFilter(SWT.KeyDown, keyFilter);
+            }
+            if (focusFilter != null) {
+                display.removeFilter(SWT.FocusIn, focusFilter);
+            }
+            for (var entry : new ArrayList<>(HINTS.entrySet())) {
+                AIPromptStyledText prompt = entry.getKey();
+                HintState hint = entry.getValue();
+                if (!prompt.isDisposed()) {
+                    prompt.removePaintListener(hint.paint());
+                    prompt.removeDisposeListener(hint.dispose());
+                    prompt.setToolTipText(hint.previousTooltip());
+                    prompt.setData(HINT_KEY, null);
+                    prompt.redraw();
+                }
+            }
+        }
+        HINTS.clear();
+        keyFilter = null;
+        focusFilter = null;
+        installedDisplay = null;
+    }
+
+    private static void keyDown(Event event) {
         if (!(event.widget instanceof AIPromptStyledText prompt) || !prompt.isFocusControl()) {
             return;
         }
@@ -77,7 +159,7 @@ public final class PromptSubmitStartup implements IStartup {
     }
 
     private static void installExistingHints(Composite parent, int depth) {
-        if (depth > 20) {
+        if (depth > 20 || HINTS.size() >= MAX_HINTS) {
             return;
         }
         for (Control child : parent.getChildren()) {
@@ -90,13 +172,14 @@ public final class PromptSubmitStartup implements IStartup {
     }
 
     private static void installHint(AIPromptStyledText prompt) {
-        if (prompt.getData(HINT_KEY) != null) {
+        if (prompt.isDisposed() || prompt.getData(HINT_KEY) != null || HINTS.size() >= MAX_HINTS) {
             return;
         }
-        prompt.setData(HINT_KEY, Boolean.TRUE);
         String hint = ResourceBundle.getBundle("org.jkiss.dbeaver.ui.ai.workbench.messages").getString("prompt.hint");
+        String previousTooltip = prompt.getToolTipText();
+        prompt.setData(HINT_KEY, Boolean.TRUE);
         prompt.setToolTipText(hint);
-        prompt.addPaintListener(event -> {
+        PaintListener paint = event -> {
             if (prompt.getCharCount() == 0 && !prompt.isFocusControl()) {
                 // Replace the original empty hint without changing the editor or its listeners.
                 event.gc.setBackground(prompt.getBackground());
@@ -106,7 +189,13 @@ public final class PromptSubmitStartup implements IStartup {
                 int top = Math.max(0, (prompt.getClientArea().height - event.gc.textExtent(hint).y) / 2);
                 event.gc.drawText(hint, 4, top, true);
             }
-        });
+        };
+        DisposeListener dispose = event -> HINTS.remove((AIPromptStyledText) event.widget);
+        HINTS.put(prompt, new HintState(paint, dispose, previousTooltip));
+        prompt.addPaintListener(paint);
+        prompt.addDisposeListener(dispose);
         prompt.redraw();
     }
+
+    private record HintState(PaintListener paint, DisposeListener dispose, String previousTooltip) { }
 }
