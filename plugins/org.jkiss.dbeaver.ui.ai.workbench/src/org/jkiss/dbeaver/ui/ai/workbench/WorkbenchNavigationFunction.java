@@ -5,6 +5,7 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
@@ -20,6 +21,9 @@ import java.util.concurrent.TimeUnit;
 
 /** Explicit native destinations; never executes a model-supplied command ID. */
 public final class WorkbenchNavigationFunction implements AIFunction {
+    private static final String ER_DIAGRAM = "er-diagram";
+    private static final String VIEW_DIAGRAM = "org.jkiss.dbeaver.erd.diagram.view";
+
     static final Map<String, String> VIEWS = Map.of(
         "database-navigator", "org.jkiss.dbeaver.core.databaseNavigator",
         "project-explorer", "org.jkiss.dbeaver.core.projectExplorer",
@@ -33,8 +37,9 @@ public final class WorkbenchNavigationFunction implements AIFunction {
     ) throws DBException {
         Object value = parameters.get("destination");
         if (!(value instanceof String destination) ||
-            !(VIEWS.containsKey(destination) || destination.equals("preferences") || destination.equals("new-connection"))) {
-            throw new DBException("Choose database-navigator, project-explorer, ai-workbench, preferences or new-connection");
+            !(VIEWS.containsKey(destination) || destination.equals("preferences")
+                || destination.equals("new-connection") || destination.equals(ER_DIAGRAM))) {
+            throw new DBException("Choose database-navigator, project-explorer, ai-workbench, preferences, new-connection or er-diagram");
         }
         CompletableFuture<String> future = new CompletableFuture<>();
         Runnable action = () -> {
@@ -50,6 +55,20 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                 if (VIEWS.containsKey(destination)) {
                     window.getActivePage().showView(VIEWS.get(destination));
                     future.complete("Opened " + destination.replace('-', ' ') + ".");
+                } else if (destination.equals(ER_DIAGRAM)) {
+                    var page = window.getActivePage();
+                    String navigatorId = VIEWS.get("database-navigator");
+                    var selection = window.getSelectionService().getSelection(navigatorId);
+                    if (!(selection instanceof IStructuredSelection selected) || selected.size() != 1) {
+                        throw new DBException("Select one table or table container in Database Navigator to open its diagram");
+                    }
+                    var service = window.getService(IHandlerService.class);
+                    if (service == null) {
+                        throw new DBException("Native command service unavailable");
+                    }
+                    page.activate(page.showView(navigatorId));
+                    service.executeCommand(VIEW_DIAGRAM, null);
+                    future.complete("Requested DBeaver's View Diagram for the selected object. Observe the workbench to verify it opened.");
                 } else {
                     // Complete before a modal native wizard enters its event loop.
                     var service = window.getService(IHandlerService.class);
@@ -80,6 +99,11 @@ public final class WorkbenchNavigationFunction implements AIFunction {
         }
         try {
             return new AIFunctionResult(AIFunctionType.INFORMATION, future.get(10, TimeUnit.SECONDS));
+        } catch (java.util.concurrent.ExecutionException e) {
+            if (e.getCause() instanceof DBException error) {
+                throw error;
+            }
+            throw new DBException("Could not open the requested workbench destination", e.getCause());
         } catch (Exception e) {
             future.cancel(false);
             throw new DBException("Could not open the requested workbench destination", e);

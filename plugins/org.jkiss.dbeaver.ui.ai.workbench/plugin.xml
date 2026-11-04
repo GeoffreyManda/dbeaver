@@ -42,7 +42,7 @@
         </function>
         <function id="navigateWorkbench" name="Open workbench destination" class="org.jkiss.dbeaver.ui.ai.workbench.WorkbenchNavigationFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
             description="Open native database navigator, project explorer, AI workbench, preferences or new connection wizard. Uses fixed native destinations only; never runs SQL, accepts credentials or executes arbitrary commands. Observe afterward to verify dialogs.">
-            <parameter name="destination" required="true" type="string" description="database-navigator, project-explorer, ai-workbench, preferences or new-connection"/>
+            <parameter name="destination" required="true" type="string" description="database-navigator, project-explorer, ai-workbench, preferences, new-connection or er-diagram. For er-diagram use one selected table or table container in Database Navigator."/>
         </function>
         <function id="sourceWorkspace" name="Choose addon source workspace" class="org.jkiss.dbeaver.ui.ai.workbench.SourceWorkspaceFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
             description="Choose the DBeaver addon source checkout using a native folder picker, or list its source-relative files. The model cannot supply a root path. Use mode list after the user closes the picker. Source changes are restricted to this addon; no database files or credentials are exposed.">
