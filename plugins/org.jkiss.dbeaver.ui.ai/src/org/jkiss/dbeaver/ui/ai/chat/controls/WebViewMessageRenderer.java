@@ -145,7 +145,8 @@ final class WebViewMessageRenderer {
                     AIFunctionDescriptor function = functionCall.getFunction();
                     AIFunctionResult functionResult = message.message().getFunctionResult();
                     boolean hasException = functionResult != null && functionResult.getException() != null;
-                    if (function == null || function.getType() == AIFunctionType.INFORMATION || hasException) {
+                    if (function == null || function.getType() == AIFunctionType.INFORMATION
+                        || functionResult != null && functionResult.getType() == AIFunctionType.INFORMATION || hasException) {
                         return false;
                     }
                 }

@@ -18,10 +18,11 @@
 package org.jkiss.dbeaver.ui.ai.workbench;
 
 import org.eclipse.swt.SWT;
+import org.jkiss.code.NotNull;
 
 /** Key policy requires no display or private prompt content. */
 public final class PromptSubmitTest {
-    public static void main(String[] args) {
+    public static void main(@NotNull String[] args) {
         check(PromptSubmitStartup.shouldSubmit(SWT.CR, 0, false));
         check(PromptSubmitStartup.shouldSubmit(SWT.KEYPAD_CR, 0, false));
         check(!PromptSubmitStartup.shouldSubmit(SWT.CR, SWT.SHIFT, false));

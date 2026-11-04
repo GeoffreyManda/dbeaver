@@ -16,6 +16,9 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;
@@ -83,6 +86,7 @@ public final class WorkbenchSceneGraph {
         }
     }
 
+    @NotNull
     public static Builder builder() {
         return new Builder();
     }
@@ -92,7 +96,7 @@ public final class WorkbenchSceneGraph {
         private final List<Edge> edges = new ArrayList<>();
         private boolean truncated;
 
-        public boolean addNode(String id, String type, Map<String, Object> properties) {
+        public boolean addNode(@NotNull String id, @NotNull String type, @NotNull Map<String, Object> properties) {
             Node node = new Node(id, type, properties);
             if (nodes.containsKey(node.id())) {
                 throw new IllegalArgumentException("Duplicate scene node id");
@@ -105,7 +109,7 @@ public final class WorkbenchSceneGraph {
             return true;
         }
 
-        public boolean addEdge(String from, String relation, String to) {
+        public boolean addEdge(@NotNull String from, @NotNull String relation, @NotNull String to) {
             Edge edge = new Edge(from, relation, to, PROVENANCE);
             if (!nodes.containsKey(from) || !nodes.containsKey(to)) {
                 throw new IllegalArgumentException("Dangling scene edge");
@@ -122,19 +126,22 @@ public final class WorkbenchSceneGraph {
             truncated = true;
         }
 
+        @NotNull
         public Snapshot build() {
             return new Snapshot(UUID.randomUUID(), Instant.now(), new ArrayList<>(nodes.values()), edges, truncated);
         }
     }
 
-    private static String text(String value) {
+    @NotNull
+    private static String text(@NotNull String value) {
         if (value == null || value.isBlank() || value.length() > MAX_TEXT_LENGTH) {
             throw new IllegalArgumentException("Scene text must contain 1 to 128 characters");
         }
         return value;
     }
 
-    private static Map<String, Object> copyProperties(Map<?, ?> source, int depth) {
+    @NotNull
+    private static Map<String, Object> copyProperties(@NotNull Map<?, ?> source, int depth) {
         Objects.requireNonNull(source);
         if (depth > MAX_DEPTH || source.size() > MAX_PROPERTIES) {
             throw new IllegalArgumentException("Scene property limit exceeded");
@@ -149,7 +156,8 @@ public final class WorkbenchSceneGraph {
         return Collections.unmodifiableMap(result);
     }
 
-    private static Object copyValue(Object value, int depth) {
+    @Nullable
+    private static Object copyValue(@Nullable Object value, int depth) {
         if (depth > MAX_DEPTH) {
             throw new IllegalArgumentException("Scene property depth exceeded");
         }

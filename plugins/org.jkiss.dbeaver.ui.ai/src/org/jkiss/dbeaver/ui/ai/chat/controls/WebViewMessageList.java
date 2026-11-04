@@ -23,7 +23,11 @@ import org.eclipse.osgi.util.NLS;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.accessibility.AccessibleAdapter;
 import org.eclipse.swt.accessibility.AccessibleEvent;
-import org.eclipse.swt.browser.*;
+import org.eclipse.swt.browser.Browser;
+import org.eclipse.swt.browser.BrowserFunction;
+import org.eclipse.swt.browser.LocationAdapter;
+import org.eclipse.swt.browser.LocationEvent;
+import org.eclipse.swt.browser.ProgressListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.program.Program;
 import org.eclipse.swt.widgets.Composite;
@@ -33,7 +37,21 @@ import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.Log;
 import org.jkiss.dbeaver.model.DBPDataSource;
-import org.jkiss.dbeaver.model.ai.*;
+import org.jkiss.dbeaver.model.ai.AIChatConversation;
+import org.jkiss.dbeaver.model.ai.AIChatListener;
+import org.jkiss.dbeaver.model.ai.AIChatMessage;
+import org.jkiss.dbeaver.model.ai.AIConfirmation;
+import org.jkiss.dbeaver.model.ai.AIConstants;
+import org.jkiss.dbeaver.model.ai.AIContextSettings;
+import org.jkiss.dbeaver.model.ai.AIFunctionCall;
+import org.jkiss.dbeaver.model.ai.AIFunctionCallConfirmation;
+import org.jkiss.dbeaver.model.ai.AIFunctionContext;
+import org.jkiss.dbeaver.model.ai.AIFunctionDescriptor;
+import org.jkiss.dbeaver.model.ai.AIFunctionResult;
+import org.jkiss.dbeaver.model.ai.AIImageAttachment;
+import org.jkiss.dbeaver.model.ai.AIMessageType;
+import org.jkiss.dbeaver.model.ai.AISettings;
+import org.jkiss.dbeaver.model.ai.AIToolboxManager;
 import org.jkiss.dbeaver.model.ai.engine.AIDatabaseContext;
 import org.jkiss.dbeaver.model.ai.registry.AISettingsEventListener;
 import org.jkiss.dbeaver.model.ai.registry.AISettingsManager;
@@ -56,7 +74,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -205,7 +229,7 @@ public class WebViewMessageList extends Composite implements AISettingsEventList
         browser.setJavascriptEnabled(true);
         browser.getAccessible().addAccessibleListener(new AccessibleAdapter() {
             @Override
-            public void getName(AccessibleEvent e) {
+            public void getName(@NotNull AccessibleEvent e) {
                 e.result = AIChatMessagesUI.ai_chat_a11y_transcript_label;
             }
         });
@@ -288,6 +312,38 @@ public class WebViewMessageList extends Composite implements AISettingsEventList
             return;
         }
         cssInitializer.refreshTheme();
+        if (!isInitWaiting) {
+            renderer.execute("setThemeStylesheet", Map.of("href", cssInitializer.getThemeStylesheetPath()));
+        }
+    }
+
+    /** Returns the explicit color palette without reading the transcript or browser document. */
+    @NotNull
+    public Map<String, String> getThemeColors() {
+        checkWidget();
+        return cssInitializer.getThemeColors();
+    }
+
+    /** Reloads the existing local theme stylesheet; does not navigate or replace chat content. */
+    public void setThemeColors(@NotNull Map<String, String> colors) {
+        checkWidget();
+        cssInitializer.setThemeColors(colors);
+        if (!isInitWaiting) {
+            renderer.execute("setThemeStylesheet", Map.of("href", cssInitializer.getThemeStylesheetPath()));
+        }
+    }
+
+    /** Returns the validated design tokens without reading chat contents. */
+    @NotNull
+    public Map<String, Object> getDesignTokens() {
+        checkWidget();
+        return cssInitializer.getDesignTokens();
+    }
+
+    /** Applies validated design tokens through the existing local stylesheet renderer. */
+    public void setDesignTokens(@NotNull Map<String, Object> tokens) {
+        checkWidget();
+        cssInitializer.setDesignTokens(tokens);
         if (!isInitWaiting) {
             renderer.execute("setThemeStylesheet", Map.of("href", cssInitializer.getThemeStylesheetPath()));
         }

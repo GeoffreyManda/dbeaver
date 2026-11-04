@@ -1,0 +1,88 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ * Licensed under the Apache License, Version 2.0.
+ */
+package org.jkiss.dbeaver.ui.ai.workbench;
+
+import org.eclipse.ui.handlers.IHandlerService;
+import org.jkiss.code.NotNull;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.model.ai.AIFunction;
+import org.jkiss.dbeaver.model.ai.AIFunctionContext;
+import org.jkiss.dbeaver.model.ai.AIFunctionResult;
+import org.jkiss.dbeaver.model.ai.AIFunctionType;
+import org.jkiss.dbeaver.ui.UIUtils;
+
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+/** Explicit native destinations; never executes a model-supplied command ID. */
+public final class WorkbenchNavigationFunction implements AIFunction {
+    static final Map<String, String> VIEWS = Map.of(
+        "database-navigator", "org.jkiss.dbeaver.core.databaseNavigator",
+        "project-explorer", "org.jkiss.dbeaver.core.projectExplorer",
+        "ai-workbench", WorkbenchAgentView.ID);
+
+    @Override
+    @NotNull
+    public AIFunctionResult callFunction(
+        @NotNull AIFunctionContext context,
+        @NotNull Map<String, Object> parameters
+    ) throws DBException {
+        Object value = parameters.get("destination");
+        if (!(value instanceof String destination) ||
+            !(VIEWS.containsKey(destination) || destination.equals("preferences") || destination.equals("new-connection"))) {
+            throw new DBException("Choose database-navigator, project-explorer, ai-workbench, preferences or new-connection");
+        }
+        CompletableFuture<String> future = new CompletableFuture<>();
+        Runnable action = () -> {
+            if (future.isCancelled() || context.getMonitor().isCanceled()) {
+                future.cancel(false);
+                return;
+            }
+            try {
+                var window = UIUtils.getActiveWorkbenchWindow();
+                if (window == null || window.getActivePage() == null) {
+                    throw new DBException("No active workbench");
+                }
+                if (VIEWS.containsKey(destination)) {
+                    window.getActivePage().showView(VIEWS.get(destination));
+                    future.complete("Opened " + destination.replace('-', ' ') + ".");
+                } else {
+                    // Complete before a modal native wizard enters its event loop.
+                    var service = window.getService(IHandlerService.class);
+                    if (service == null) {
+                        throw new DBException("Native command service unavailable");
+                    }
+                    String id = destination.equals("preferences") ? "org.eclipse.ui.window.preferences"
+                        : "org.jkiss.dbeaver.core.new.connection";
+                    UIUtils.asyncExec(() -> {
+                        try {
+                            service.executeCommand(id, null);
+                        } catch (Exception e) {
+                            org.jkiss.dbeaver.runtime.DBWorkbench.getPlatformUI().showError(
+                                "Navigation failed", "Could not open the native dialog", e);
+                        }
+                    });
+                    future.complete("Requested the native " + destination.replace('-', ' ')
+                        + " dialog. Observe the workbench to verify it opened.");
+                }
+            } catch (Exception e) {
+                future.completeExceptionally(e);
+            }
+        };
+        if (org.eclipse.swt.widgets.Display.getCurrent() == UIUtils.getDisplay()) {
+            action.run();
+        } else {
+            UIUtils.asyncExec(action);
+        }
+        try {
+            return new AIFunctionResult(AIFunctionType.INFORMATION, future.get(10, TimeUnit.SECONDS));
+        } catch (Exception e) {
+            future.cancel(false);
+            throw new DBException("Could not open the requested workbench destination", e);
+        }
+    }
+}

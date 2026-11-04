@@ -17,6 +17,8 @@
 
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.lang.reflect.InvocationTargetException;
@@ -39,7 +41,7 @@ public final class EngineeringProfileRunnerTest {
     private EngineeringProfileRunnerTest() {
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(@NotNull String[] args) throws Exception {
         if (args.length > 0) {
             child(args);
             return;
@@ -120,7 +122,7 @@ public final class EngineeringProfileRunnerTest {
         }
     }
 
-    private static void child(String[] args) throws Exception {
+    private static void child(@NotNull String[] args) throws Exception {
         if (args[0].equals("child-overflow")) {
             System.out.write(new byte[17 * 1024]);
             System.out.flush();
@@ -132,7 +134,8 @@ public final class EngineeringProfileRunnerTest {
         Thread.sleep(30000);
     }
 
-    private static List<String> command(String... arguments) {
+    @NotNull
+    private static List<String> command(@NotNull String... arguments) {
         String suffix = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? ".exe" : "";
         List<String> command = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java" + suffix).toString(),
             "-classpath", System.getProperty("java.class.path"), EngineeringProfileRunnerTest.class.getName()));
@@ -140,7 +143,9 @@ public final class EngineeringProfileRunnerTest {
         return command;
     }
 
-    private static byte[] process(List<String> command, BooleanSupplier canceled, Duration timeout) throws Exception {
+    @NotNull
+    private static byte[] process(@NotNull List<String> command, @NotNull BooleanSupplier canceled,
+        @NotNull Duration timeout) throws Exception {
         Method method = EngineeringProfileRunner.class.getDeclaredMethod("runProcess", List.class, BooleanSupplier.class, long.class);
         method.setAccessible(true);
         try {
@@ -153,7 +158,7 @@ public final class EngineeringProfileRunnerTest {
         }
     }
 
-    private static boolean available(String executable) throws Exception {
+    private static boolean available(@NotNull String executable) throws Exception {
         Method method = EngineeringProfileRunner.class.getDeclaredMethod("interpreter", String.class);
         method.setAccessible(true);
         try {
@@ -167,7 +172,7 @@ public final class EngineeringProfileRunnerTest {
         }
     }
 
-    private static void rejects(Checked action) throws Exception {
+    private static void rejects(@NotNull Checked action) throws Exception {
         try {
             action.run();
             throw new AssertionError("Expected a rejected operation");
@@ -176,7 +181,7 @@ public final class EngineeringProfileRunnerTest {
         }
     }
 
-    private static void check(boolean condition, String message) {
+    private static void check(boolean condition, @NotNull String message) {
         if (!condition) {
             throw new AssertionError(message);
         }

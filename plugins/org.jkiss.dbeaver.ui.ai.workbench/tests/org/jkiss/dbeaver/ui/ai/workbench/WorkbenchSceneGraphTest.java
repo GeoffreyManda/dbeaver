@@ -16,6 +16,8 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,7 +27,7 @@ import java.util.UUID;
 
 /** Dependency-free checks, invoked by the bounded add-on build. */
 public final class WorkbenchSceneGraphTest {
-    public static void main(String[] arguments) {
+    public static void main(@NotNull String[] arguments) {
         bounds();
         invalidGraph();
         immutableSnapshot();
@@ -74,7 +76,7 @@ public final class WorkbenchSceneGraphTest {
         properties.put("state", nestedMap);
         WorkbenchSceneGraph.Builder builder = WorkbenchSceneGraph.builder();
         builder.addNode("a", "editor", properties);
-        WorkbenchSceneGraph.Snapshot first = builder.build();
+        final WorkbenchSceneGraph.Snapshot first = builder.build();
         nested.set(0, "changed");
         nestedMap.put("enabled", false);
         properties.clear();
@@ -97,6 +99,7 @@ public final class WorkbenchSceneGraphTest {
 
     private static void safeProperties() {
         Object unsafe = new Object() {
+            @NotNull
             @Override
             public String toString() {
                 throw new AssertionError("Arbitrary contents were read");
@@ -116,13 +119,13 @@ public final class WorkbenchSceneGraphTest {
         check(new WorkbenchSceneGraph.Node("a", "editor", nullable).properties().containsKey("unknown"), "Unknown value lost");
     }
 
-    private static void check(boolean condition, String message) {
+    private static void check(boolean condition, @NotNull String message) {
         if (!condition) {
             throw new AssertionError(message);
         }
     }
 
-    private static void expect(Class<? extends Throwable> expected, Runnable action) {
+    private static void expect(@NotNull Class<? extends Throwable> expected, @NotNull Runnable action) {
         try {
             action.run();
         } catch (Throwable error) {

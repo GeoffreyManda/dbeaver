@@ -139,6 +139,7 @@ public class AIAssistantImpl implements AIAssistant {
                             List<AIMessage> newMessages = new ArrayList<>(request.getMessages());
                             AIMessage fcMessage = AIMessage.functionCall(functionCall, result);
                             newMessages.add(fcMessage);
+                            AIVisualToolOutput.appendToRequest(newMessages, result);
                             AIEngineRequest newRequest = new AIEngineRequest(newMessages);
                             newRequest.setFunctions(request.getFunctions());
 
@@ -356,8 +357,9 @@ public class AIAssistantImpl implements AIAssistant {
                         chatListener.complete(List.of(), true, false);
                         return;
                     }
-                    if (function.getType() == AIFunctionType.INFORMATION) {
+                    if (function.getType() == AIFunctionType.INFORMATION || result.getType() == AIFunctionType.INFORMATION) {
                         newMessages.add(fcMessage);
+                        AIVisualToolOutput.appendToRequest(newMessages, result);
                     }
                 } catch (Exception e) {
                     chatListener.error(e);
@@ -565,10 +567,12 @@ public class AIAssistantImpl implements AIAssistant {
         return profile.getConfiguration();
     }
 
-    protected static <T> T callWithRetry(ThrowableSupplier<T, DBException> supplier) throws DBException {
+    @Nullable
+    protected static <T> T callWithRetry(@NotNull ThrowableSupplier<T, DBException> supplier) throws DBException {
         return callWithRetry(null, supplier);
     }
 
+    @Nullable
     protected static <T> T callWithRetry(
         @Nullable AIEngineResponseConsumer listener,
         @NotNull ThrowableSupplier<T, DBException> supplier

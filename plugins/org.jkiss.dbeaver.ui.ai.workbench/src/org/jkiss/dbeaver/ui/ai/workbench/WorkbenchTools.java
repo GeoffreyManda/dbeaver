@@ -111,9 +111,9 @@ final class WorkbenchTools {
             "coverage", "active page, visible native shells/controls and fetched metadata; browser DOM and cell content unobserved");
     }
 
-    private static void addParts(WorkbenchSceneGraph.Builder graph,
-        Map<String, IWorkbenchPartReference> parts, IWorkbenchPartReference[] refs,
-        String type, IWorkbenchPage page) {
+    private static void addParts(@NotNull WorkbenchSceneGraph.Builder graph,
+        @NotNull Map<String, IWorkbenchPartReference> parts, @NotNull IWorkbenchPartReference[] refs,
+        @NotNull String type, @NotNull IWorkbenchPage page) {
         for (IWorkbenchPartReference ref : refs) {
             if (parts.size() >= MAX_PARTS) {
                 graph.markTruncated();
@@ -170,7 +170,26 @@ final class WorkbenchTools {
         return observe();
     }
 
-    static void disclose(String id, Set<String> nodes) {
+    @NotNull
+    static ResultSetViewer observedResult(@NotNull String snapshotId) throws DBException {
+        Observation state = observation;
+        Disclosure visible = disclosure;
+        var window = UIUtils.getActiveWorkbenchWindow();
+        if (state == null || !state.id().equals(snapshotId) || visible == null || !visible.id().equals(snapshotId)
+            || !visible.nodes().contains("result") || Duration.between(state.time(), Instant.now()).compareTo(MAX_AGE) > 0
+            || window == null || window.getActivePage() != state.page() || state.page().getActiveEditor() != state.editor()) {
+            throw new DBException("Stale result observation; observe again before formatting");
+        }
+        var current = ResultSetHandlerMain.getActiveResultSet(state.editor());
+        if (!(current instanceof ResultSetViewer viewer) || current != state.result() || current.getControl().isDisposed()
+            || current.isRefreshInProgress() || current.getModel().isDirty() || current.getModel().getRowCount() != state.rows()) {
+            throw new DBException("Fetched result changed; observe again before formatting");
+        }
+        clearObservation();
+        return viewer;
+    }
+
+    static void disclose(@NotNull String id, @NotNull Set<String> nodes) {
         Observation state = observation;
         if (state != null && state.id().equals(id)) {
             disclosure = new Disclosure(id, Set.copyOf(nodes));
@@ -202,7 +221,7 @@ final class WorkbenchTools {
     private static final class Invalidator implements IResultSetListener {
         private final String id;
 
-        private Invalidator(String id) {
+        private Invalidator(@NotNull String id) {
             this.id = id;
         }
 
@@ -221,16 +240,22 @@ final class WorkbenchTools {
         }
 
         @Override
-        public void handleResultSetLoad() { invalidate(); }
+        public void handleResultSetLoad() {
+            invalidate();
+        }
 
         @Override
-        public void handleResultSetChange() { invalidate(); }
+        public void handleResultSetChange() {
+            invalidate();
+        }
 
         @Override
-        public void onModelPrepared() { invalidate(); }
+        public void onModelPrepared() {
+            invalidate();
+        }
 
         @Override
-        public void handleResultSetSelectionChange(SelectionChangedEvent event) { }
+        public void handleResultSetSelectionChange(@NotNull SelectionChangedEvent event) { }
     }
 
     private record Observation(String id, Instant time, IWorkbenchPage page, IEditorPart editor,

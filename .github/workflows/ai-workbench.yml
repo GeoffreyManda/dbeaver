@@ -5,11 +5,21 @@ on:
     paths:
       - 'plugins/org.jkiss.dbeaver.ui.ai.workbench/**'
       - 'scripts/build-workbench-tools.py'
+      - 'scripts/install-workbench-tools.py'
+      - 'scripts/check-workbench-style.py'
+      - 'scripts/checkstyle.xml'
+      - 'plugins/org.jkiss.dbeaver.ui.ai/src/**'
+      - 'plugins/org.jkiss.dbeaver.model.ai/src/**'
       - '.github/workflows/ai-workbench.yml'
   pull_request:
     paths:
       - 'plugins/org.jkiss.dbeaver.ui.ai.workbench/**'
       - 'scripts/build-workbench-tools.py'
+      - 'scripts/install-workbench-tools.py'
+      - 'scripts/check-workbench-style.py'
+      - 'scripts/checkstyle.xml'
+      - 'plugins/org.jkiss.dbeaver.ui.ai/src/**'
+      - 'plugins/org.jkiss.dbeaver.model.ai/src/**'
       - '.github/workflows/ai-workbench.yml'
 permissions:
   contents: read
@@ -26,12 +36,19 @@ jobs:
           sparse-checkout: |
             plugins/org.jkiss.dbeaver.ui.ai.workbench
             scripts/build-workbench-tools.py
+            scripts/install-workbench-tools.py
+            scripts/check-workbench-style.py
+            scripts/checkstyle.xml
+            plugins/org.jkiss.dbeaver.ui.ai/src
+            plugins/org.jkiss.dbeaver.model.ai/src
             docs
             LICENSE.md
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+      - name: Check source style before building
+        run: python3 scripts/check-workbench-style.py --cache "$RUNNER_TEMP/dbeaver-checkstyle"
       - name: Compile and test against official Community APIs
         shell: bash
         run: |
@@ -48,6 +65,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ai-workbench-addon
-          path: plugins/org.jkiss.dbeaver.ui.ai.workbench/target/*.jar
+          path: |
+            plugins/org.jkiss.dbeaver.ui.ai.workbench/target/*.jar
+            plugins/org.jkiss.dbeaver.ui.ai.workbench/target/workbench-theme-api.zip
           retention-days: 3
           if-no-files-found: error

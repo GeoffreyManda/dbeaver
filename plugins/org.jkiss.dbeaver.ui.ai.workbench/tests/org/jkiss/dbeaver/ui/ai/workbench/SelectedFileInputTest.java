@@ -21,13 +21,14 @@ import org.eclipse.core.runtime.Path;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IPathEditorInput;
 import org.eclipse.ui.IURIEditorInput;
+import org.jkiss.code.NotNull;
 
 import java.lang.reflect.Proxy;
 import java.net.URI;
 
 /** Native editor adapters must never turn remote or arbitrary input into a file read. */
 public final class SelectedFileInputTest {
-    public static void main(String[] args) {
+    public static void main(@NotNull String[] args) {
         var csv = input(IURIEditorInput.class, URI.create("file:///tmp/public-fixture.csv"));
         check(ProfileSelectedFileFunction.selectedFile(csv).isAbsolute());
         check(ProfileSelectedFileFunction.selectedFile(input(IURIEditorInput.class,
@@ -42,7 +43,8 @@ public final class SelectedFileInputTest {
             new Path("/tmp/public-fixture.csv"))).isAbsolute());
     }
 
-    private static IEditorInput input(Class<?> type, Object value) {
+    @NotNull
+    private static IEditorInput input(@NotNull Class<?> type, @NotNull Object value) {
         return (IEditorInput) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type},
             (proxy, method, arguments) -> {
                 if (method.getName().equals("getURI") || method.getName().equals("getPath")) {
@@ -52,7 +54,7 @@ public final class SelectedFileInputTest {
             });
     }
 
-    private static void reject(IEditorInput input) {
+    private static void reject(@NotNull IEditorInput input) {
         try {
             ProfileSelectedFileFunction.selectedFile(input);
             throw new AssertionError("Unsupported input accepted");

@@ -54,9 +54,11 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
             "r|read.table|read.csv|إدخال|قراءة|lecture|lectura|读取"));
 
     private record Topic(String title, URI uri, String aliases) { }
+
     private record Ranked(Topic topic, int score) { }
 
-    private static Topic topic(String title, String path, String aliases) {
+    @NotNull
+    private static Topic topic(@NotNull String title, @NotNull String path, @NotNull String aliases) {
         return new Topic(title, URI.create("https://dbeaver.com/docs/dbeaver/" + path), aliases);
     }
 
@@ -64,7 +66,9 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
     @Override
     public AIFunctionResult callFunction(@NotNull AIFunctionContext context,
         @NotNull Map<String, Object> parameters) throws DBException {
-        if (context.getMonitor().isCanceled()) { throw new DBException("Canceled"); }
+        if (context.getMonitor().isCanceled()) {
+            throw new DBException("Canceled");
+        }
         if (!(parameters.get("query") instanceof String query) || query.isBlank() || query.length() > 160) {
             throw new DBException("Query length must be 1..160");
         }
@@ -103,7 +107,7 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
         return new AIFunctionResult(AIFunctionType.INFORMATION, json);
     }
 
-    private static int score(Topic topic, String query, Set<String> words) {
+    private static int score(@NotNull Topic topic, @NotNull String query, @NotNull Set<String> words) {
         int result = 0;
         for (String alias : topic.aliases().split("\\|")) {
             String term = normalize(alias);
@@ -115,7 +119,9 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
         return result;
     }
 
-    private static Map<String, Object> retrieve(Topic topic, AIFunctionContext context, long overallDeadline) throws Exception {
+    @NotNull
+    private static Map<String, Object> retrieve(@NotNull Topic topic, @NotNull AIFunctionContext context,
+        long overallDeadline) throws Exception {
         if (!TOPICS.contains(topic)) {
             throw new DBException("URL not allowlisted");
         }
@@ -152,17 +158,27 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
         }
     }
 
-    private static String normalize(String value) {
+    @NotNull
+    private static String normalize(@NotNull String value) {
         return Normalizer.normalize(value, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
     }
 
-    private static String plainText(String html) {
+    @NotNull
+    private static String plainText(@NotNull String html) {
         char[] chars = html.toCharArray();
-        for (int i = 0; i < chars.length; i++) { if (chars[i] >= 'A' && chars[i] <= 'Z') { chars[i] += 32; } }
+        for (int i = 0; i < chars.length; i++) {
+            if (chars[i] >= 'A' && chars[i] <= 'Z') {
+                chars[i] += 32;
+            }
+        }
         String lower = new String(chars);
         int start = lower.indexOf("<article");
-        if (start < 0) { start = lower.indexOf("<main"); }
-        if (start < 0) { start = lower.indexOf("<section"); }
+        if (start < 0) {
+            start = lower.indexOf("<main");
+        }
+        if (start < 0) {
+            start = lower.indexOf("<section");
+        }
         StringBuilder text = new StringBuilder();
         for (int index = Math.max(0, start); index < html.length();) {
             if (lower.startsWith("<!--", index)) {
@@ -175,12 +191,16 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
                 continue;
             }
             int end = html.indexOf('>', index + 1);
-            if (end < 0) { break; }
+            if (end < 0) {
+                break;
+            }
             String tag = lower.substring(index + 1, Math.min(end, index + 80)).strip().split("[\\s/>]", 2)[0];
             if (Set.of("script", "style", "nav", "header", "footer", "noscript").contains(tag)) {
                 int close = lower.indexOf("</" + tag, end + 1);
                 end = close < 0 ? html.length() : html.indexOf('>', close);
-                if (end < 0) { break; }
+                if (end < 0) {
+                    break;
+                }
             }
             text.append(' ');
             index = end + 1;
@@ -199,11 +219,14 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
         matcher.appendTail(decoded);
         String result = decoded.toString().replace('<', '‹').replace('>', '›').replaceAll("(?U)\\s+", " ").strip();
         int end = Math.min(result.length(), MAX_EXCERPT);
-        if (end > 0 && Character.isHighSurrogate(result.charAt(end - 1))) { end--; }
+        if (end > 0 && Character.isHighSurrogate(result.charAt(end - 1))) {
+            end--;
+        }
         return result.substring(0, end);
     }
 
-    private static String numericEntity(String entity) {
+    @NotNull
+    private static String numericEntity(@NotNull String entity) {
         try {
             int codePoint = Integer.parseInt(entity.substring(entity.startsWith("#x") ? 2 : 1), entity.startsWith("#x") ? 16 : 10);
             return Character.isValidCodePoint(codePoint) && !(codePoint >= 0xD800 && codePoint <= 0xDFFF)
@@ -219,9 +242,20 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
         private volatile Flow.Subscription subscription;
         private volatile boolean truncated;
 
-        @Override public CompletionStage<byte[]> getBody() { return result; }
-        @Override public void onSubscribe(Flow.Subscription value) { subscription = value; value.request(1); }
-        @Override public void onNext(List<ByteBuffer> buffers) {
+        @NotNull
+        @Override
+        public CompletionStage<byte[]> getBody() {
+            return result;
+        }
+
+        @Override
+        public void onSubscribe(@NotNull Flow.Subscription value) {
+            subscription = value;
+            value.request(1);
+        }
+
+        @Override
+        public void onNext(@NotNull List<ByteBuffer> buffers) {
             for (ByteBuffer buffer : buffers) {
                 int count = Math.min(buffer.remaining(), MAX_BODY - bytes.size());
                 byte[] chunk = new byte[count];
@@ -236,8 +270,21 @@ public final class SearchOfficialDocumentationFunction implements AIFunction {
             }
             subscription.request(1);
         }
-        @Override public void onError(Throwable error) { result.completeExceptionally(error); }
-        @Override public void onComplete() { result.complete(bytes.toByteArray()); }
-        private void cancel() { if (subscription != null) { subscription.cancel(); } }
+
+        @Override
+        public void onError(@NotNull Throwable error) {
+            result.completeExceptionally(error);
+        }
+
+        @Override
+        public void onComplete() {
+            result.complete(bytes.toByteArray());
+        }
+
+        private void cancel() {
+            if (subscription != null) {
+                subscription.cancel();
+            }
+        }
     }
 }

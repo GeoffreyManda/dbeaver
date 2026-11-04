@@ -24,6 +24,9 @@ import org.jkiss.dbeaver.ui.UIUtils;
 public final class AppearanceStartup implements IStartup {
     @Override
     public void earlyStartup() {
-        UIUtils.asyncExec(WorkbenchAppearance::restoreSaved);
+        UIUtils.asyncExec(() -> {
+            WorkbenchAppearance.restoreSaved();
+            WorkbenchDesign.restoreSaved();
+        });
     }
 }

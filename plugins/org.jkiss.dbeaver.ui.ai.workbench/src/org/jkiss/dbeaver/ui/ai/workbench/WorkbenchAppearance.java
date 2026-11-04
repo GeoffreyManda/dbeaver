@@ -20,27 +20,24 @@ import org.eclipse.jface.util.IPropertyChangeListener;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.SWTException;
 import org.eclipse.swt.browser.Browser;
-import org.eclipse.swt.custom.CCombo;
 import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.DisposeListener;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.RGB;
-import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
-import org.eclipse.swt.widgets.CoolBar;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Listener;
-import org.eclipse.swt.widgets.Sash;
-import org.eclipse.swt.widgets.Table;
-import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
-import org.eclipse.swt.widgets.Tree;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.themes.IThemeManager;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIStyles;
+import org.jkiss.dbeaver.ui.ai.chat.controls.AIPromptStyledText;
+import org.jkiss.dbeaver.ui.ai.chat.controls.WebViewMessageList;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -58,8 +55,10 @@ public final class WorkbenchAppearance {
     private static final int MAX_QUEUE = 4096;
     private static final AtomicLong GENERATION = new AtomicLong();
     private static final Map<Control, Original> ORIGINALS = new IdentityHashMap<>();
+    private static final Map<CTabItem, TabOriginal> TAB_ORIGINALS = new IdentityHashMap<>();
     private static final Map<Integer, Color> COLORS = new LinkedHashMap<>();
     private static final DisposeListener DISPOSE = event -> ORIGINALS.remove((Control) event.widget);
+    private static final DisposeListener TAB_DISPOSE = event -> TAB_ORIGINALS.remove((CTabItem) event.widget);
     private static volatile Display installedDisplay;
     private static long installedGeneration;
     private static String activeAccent;
@@ -67,15 +66,25 @@ public final class WorkbenchAppearance {
     private static Listener refreshFilter;
     private static IThemeManager themeManager;
     private static IPropertyChangeListener themeListener;
+    private static final org.eclipse.swt.events.PaintListener TAB_HIGHLIGHT = event -> {
+        CTabFolder folder = (CTabFolder) event.widget;
+        if (activePalette != null && folder.getSelection() != null) {
+            var bounds = folder.getSelection().getBounds();
+            event.gc.setBackground(color(activePalette.accent()));
+            event.gc.fillRectangle(bounds.x, bounds.y + bounds.height - 2, bounds.width, 2);
+        }
+    };
     private static boolean queued;
     private static boolean rebaseRequested;
     private static boolean truncated;
 
-    private WorkbenchAppearance() { }
+    private WorkbenchAppearance() {
+    }
 
     /** Applies only colors to native tab headers/toolbars and persists the normalized RGB preference. */
-    public static Map<String, Object> apply(String accent) {
-        Display display = requireDisplay();
+    @NotNull
+    public static Map<String, Object> apply(@NotNull String accent) {
+        final Display display = requireDisplay();
         String normalized = normalizeAccent(accent);
         int restored = ORIGINALS.size();
         long generation = GENERATION.incrementAndGet();
@@ -83,7 +92,7 @@ public final class WorkbenchAppearance {
         if (normalized.isEmpty()) {
             DBWorkbench.getPlatform().getPreferenceStore().setValue(PREFERENCE_KEY, "");
             return Map.of("accent", "default", "styledControls", 0, "restoredControls", restored,
-                "scope", "native interface surfaces, tabs and toolbars", "persisted", true);
+                "scope", "native interface and embedded chat", "persisted", true);
         }
         if (generation != GENERATION.get()) {
             throw new IllegalStateException("Appearance operation canceled");
@@ -99,9 +108,32 @@ public final class WorkbenchAppearance {
             throw new IllegalStateException("Appearance operation canceled");
         }
         DBWorkbench.getPlatform().getPreferenceStore().setValue(PREFERENCE_KEY, normalized);
-        return Map.of("accent", normalized, "styledControls", ORIGINALS.size(),
+        return Map.of("accent", normalized, "styledControls", ORIGINALS.size(), "styledTabLabels", TAB_ORIGINALS.size(),
+            "styledChatViews", WorkbenchThemeIntegration.size(),
             "themeMode", activePalette.dark() ? "dark" : "light", "truncated", truncated,
-            "scope", "native interface surfaces, tabs and toolbars", "persisted", true);
+            "scope", "native interface and embedded chat", "persisted", true);
+    }
+
+    /** Repaints design-aware surfaces without changing the user's saved accent. */
+    public static void refreshForDesign() {
+        Display display = requireDisplay();
+        String saved = DBWorkbench.getPlatform().getPreferenceStore().getString(PREFERENCE_KEY);
+        if ((saved == null || saved.isBlank()) && !WorkbenchDesign.isGlass()) {
+            if (installedDisplay != null) {
+                GENERATION.incrementAndGet();
+                reset(true);
+            }
+            return;
+        }
+        if (installedDisplay == null) {
+            installedGeneration = GENERATION.incrementAndGet();
+            installedDisplay = display;
+            activeAccent = saved == null || saved.isBlank()
+                ? String.format(Locale.ROOT, "#%06X", rgb(display.getSystemColor(SWT.COLOR_LIST_SELECTION).getRGB())) : saved;
+            activePalette = palette(activeAccent, UIStyles.isDarkTheme());
+            installHooks(display);
+        }
+        scan(display);
     }
 
     /** Called by the normal startup path, never by a background documentation tool. */
@@ -140,11 +172,14 @@ public final class WorkbenchAppearance {
                 }
             });
         } catch (SWTException e) {
-            if (!display.isDisposed()) { throw e; }
+            if (!display.isDisposed()) {
+                throw e;
+            }
             forgetDisposed(display);
         }
     }
 
+    @NotNull
     private static Display requireDisplay() {
         Display display = Display.getCurrent();
         if (display == null || display.isDisposed()) {
@@ -153,7 +188,7 @@ public final class WorkbenchAppearance {
         return display;
     }
 
-    private static void installHooks(Display display) {
+    private static void installHooks(@NotNull Display display) {
         refreshFilter = event -> schedule(event.type == SWT.Skin || event.type == SWT.Settings);
         for (int event : new int[] { SWT.Show, SWT.Skin, SWT.Settings, SWT.Activate, SWT.Selection }) {
             display.addFilter(event, refreshFilter);
@@ -174,12 +209,16 @@ public final class WorkbenchAppearance {
         long generation = installedGeneration;
         if (Display.getCurrent() != display) {
             display.asyncExec(() -> {
-                if (display == installedDisplay && generation == installedGeneration) { schedule(rebase); }
+                if (display == installedDisplay && generation == installedGeneration) {
+                    schedule(rebase);
+                }
             });
             return;
         }
         rebaseRequested |= rebase;
-        if (queued) { return; }
+        if (queued) {
+            return;
+        }
         queued = true;
         display.asyncExec(() -> {
             if (display != installedDisplay || generation != installedGeneration || generation != GENERATION.get()) {
@@ -196,148 +235,253 @@ public final class WorkbenchAppearance {
         });
     }
 
-    private static void scan(Display display) {
+    private static void scan(@NotNull Display display) {
         ArrayDeque<Control> queue = new ArrayDeque<>();
         for (var shell : display.getShells()) {
-            if (queue.size() == MAX_QUEUE) { truncated = true; break; }
+            if (queue.size() == MAX_QUEUE) {
+                truncated = true;
+                break;
+            }
             queue.addLast(shell);
         }
         int scanned = 0;
         while (!queue.isEmpty()) {
-            if (++scanned > MAX_SCAN) { truncated = true; break; }
+            if (++scanned > MAX_SCAN) {
+                truncated = true;
+                break;
+            }
             Control control = queue.removeFirst();
-            if (control.isDisposed() || control instanceof Browser) { continue; }
+            if (control.isDisposed()) {
+                continue;
+            }
+            boolean material = WorkbenchDesign.isGlass() && NativeWorkbenchMaterial.isApplied(control.getShell());
+            if (control instanceof Browser) {
+                if (material) {
+                    NativeWorkbenchMaterial.prepareControl(control);
+                }
+                continue;
+            }
+            if (control instanceof WebViewMessageList chat && !WorkbenchThemeIntegration.apply(chat, activePalette)) {
+                truncated = true;
+            }
             style(control);
+            if (material) {
+                NativeWorkbenchMaterial.prepareControl(control);
+                if (control instanceof CTabFolder) {
+                    NativeWorkbenchMaterial.applyRegion(control);
+                }
+            }
             if (control instanceof Composite composite) {
                 for (Control child : composite.getChildren()) {
-                    if (queue.size() == MAX_QUEUE) { truncated = true; break; }
+                    if (queue.size() == MAX_QUEUE) {
+                        truncated = true;
+                        break;
+                    }
                     queue.addLast(child);
                 }
             }
         }
+        WorkbenchDesign.refreshFromAppearance();
     }
 
-    private static boolean protectedContent(Control control) {
-        return control instanceof Text || control instanceof StyledText || control instanceof Browser
-            || control instanceof Combo || control instanceof CCombo || control instanceof Tree || control instanceof Table;
-    }
-
-    private static boolean safeChrome(Composite parent) {
-        ArrayDeque<Control> queue = new ArrayDeque<>();
-        queue.add(parent);
-        int count = 0;
-        while (!queue.isEmpty()) {
-            if (++count > 256) { return false; }
-            Control control = queue.removeFirst();
-            if (control.isDisposed()) { continue; }
-            if (protectedContent(control)) { return false; }
-            if (control instanceof Composite composite) {
-                for (Control child : composite.getChildren()) {
-                    if (queue.size() == 256) { return false; }
-                    queue.addLast(child);
-                }
-            }
-        }
-        return true;
-    }
-
-    private static void style(Control control) {
+    private static void style(@NotNull Control control) {
         if (!ORIGINALS.containsKey(control)) {
-            if (ORIGINALS.size() == MAX_CONTROLS) { truncated = true; return; }
+            if (ORIGINALS.size() + TAB_ORIGINALS.size() == MAX_CONTROLS) {
+                truncated = true;
+                return;
+            }
             ORIGINALS.put(control, Original.capture(control));
             control.addDisposeListener(DISPOSE);
+            if (control instanceof CTabFolder folder) {
+                folder.addPaintListener(TAB_HIGHLIGHT);
+            }
         }
+        boolean glass = WorkbenchDesign.isGlass() && NativeWorkbenchMaterial.isApplied(control.getShell());
+        Color background = glass ? translucent(activePalette.chrome(), WorkbenchDesign.glassOpacity())
+            : color(activePalette.chrome());
         if (control instanceof CTabFolder folder) {
-            // Apply both the inactive surface and selected header with readable text.
-            folder.setBackground(color(activePalette.chrome()));
+            rememberTabItems(folder);
+            folder.setBackground(new Color[] {background, background},
+                new int[] {100}, true);
             folder.setForeground(color(activePalette.chromeForeground()));
-            folder.setSelectionBackground(color(activePalette.accent()));
-            folder.setSelectionForeground(color(activePalette.selectionForeground()));
+            folder.setSelectionBackground(new Color[] {background, background},
+                new int[] {100}, true);
+            folder.setSelectionForeground(color(activePalette.chromeForeground()));
+            WorkbenchTabMaterial.apply(folder, glass);
+            for (CTabItem item : folder.getItems()) {
+                if (TAB_ORIGINALS.containsKey(item)) {
+                    item.setForeground(color(activePalette.chromeForeground()));
+                    item.setSelectionForeground(color(activePalette.chromeForeground()));
+                }
+            }
         } else {
-            control.setBackground(color(activePalette.chrome()));
-            if (!(control instanceof StyledText)) {
+            // Retain a nonzero alpha so Cocoa uses the alpha-aware background-control paint path.
+            control.setBackground(background);
+            if (!(control instanceof StyledText) || control instanceof AIPromptStyledText) {
                 control.setForeground(color(activePalette.chromeForeground()));
             }
         }
         control.redraw();
     }
 
+    private static void rememberTabItems(@NotNull CTabFolder folder) {
+        Original parent = ORIGINALS.get(folder);
+        for (CTabItem item : folder.getItems()) {
+            if (item.isDisposed() || TAB_ORIGINALS.containsKey(item)) {
+                continue;
+            }
+            if (ORIGINALS.size() + TAB_ORIGINALS.size() == MAX_CONTROLS) {
+                truncated = true;
+                break;
+            }
+            Color foreground = item.getForeground();
+            Color selected = item.getSelectionForeground();
+            TAB_ORIGINALS.put(item, new TabOriginal(ownedColor(foreground) ? parent.foreground() : foreground,
+                ownedColor(selected) ? parent.selectedForeground() : selected));
+            item.addDisposeListener(TAB_DISPOSE);
+        }
+    }
+
+    private record TabOriginal(@Nullable Color foreground, @Nullable Color selected) {
+    }
+
+    @NotNull
     private static Color color(int rgb) {
         return COLORS.computeIfAbsent(rgb, value -> new Color(installedDisplay,
             value >>> 16 & 255, value >>> 8 & 255, value & 255));
     }
 
-    private static boolean ownedColor(Color color) {
-        return color != null && !color.isDisposed() && COLORS.containsKey(rgb(color.getRGB()));
+    private static boolean ownedColor(@Nullable Color color) {
+        return color != null && !color.isDisposed() && COLORS.containsValue(color);
+    }
+
+    @NotNull
+    private static Color translucent(int rgb, double opacity) {
+        int alpha = Math.max(5, Math.min(51, (int) Math.round(opacity * 255)));
+        int key = alpha << 24 | rgb;
+        return COLORS.computeIfAbsent(key, ignored -> new Color(installedDisplay,
+            new org.eclipse.swt.graphics.RGBA(rgb >>> 16 & 255, rgb >>> 8 & 255, rgb & 255, alpha)));
     }
 
     private static void rebaseOriginals() {
         for (var entry : ORIGINALS.entrySet()) {
             Control control = entry.getKey();
-            if (!control.isDisposed()) { entry.setValue(entry.getValue().rebase(control)); }
+            if (!control.isDisposed()) {
+                entry.setValue(entry.getValue().rebase(control));
+            }
+        }
+        for (var entry : TAB_ORIGINALS.entrySet()) {
+            CTabItem item = entry.getKey();
+            if (!item.isDisposed()) {
+                Color foreground = item.getForeground();
+                Color selected = item.getSelectionForeground();
+                entry.setValue(new TabOriginal(ownedColor(foreground) ? entry.getValue().foreground() : foreground,
+                    ownedColor(selected) ? entry.getValue().selected() : selected));
+            }
         }
     }
 
-    private record Original(Color background, Color foreground, Color selectedBackground, Color selectedForeground) {
-        static Original capture(Control control) {
+    private record Original(@NotNull Color background, @NotNull Color foreground,
+        @Nullable Color selectedBackground, @Nullable Color selectedForeground) {
+        @NotNull
+        static Original capture(@NotNull Control control) {
             return new Original(control.getBackground(), control.getForeground(),
                 control instanceof CTabFolder folder ? folder.getSelectionBackground() : null,
                 control instanceof CTabFolder folder ? folder.getSelectionForeground() : null);
         }
 
-        Original rebase(Control control) {
+        @NotNull
+        Original rebase(@NotNull Control control) {
             Original current = capture(control);
             return new Original(base(current.background, background), base(current.foreground, foreground),
                 base(current.selectedBackground, selectedBackground), base(current.selectedForeground, selectedForeground));
         }
 
-        private static Color base(Color current, Color original) {
+        @Nullable
+        private static Color base(@Nullable Color current, @Nullable Color original) {
             return ownedColor(current) ? original : current;
         }
     }
 
-    private static Color live(Color original, Display display, int fallback) {
+    @NotNull
+    private static Color live(@Nullable Color original, @NotNull Display display, int fallback) {
         return original == null || original.isDisposed() ? display.getSystemColor(fallback) : original;
     }
 
     private static void reset(boolean reskin) {
         Display display = installedDisplay;
-        if (display == null) { return; }
-        if (display.isDisposed()) { forgetDisposed(display); return; }
+        if (display == null) {
+            return;
+        }
+        if (display.isDisposed()) {
+            forgetDisposed(display);
+            return;
+        }
         if (refreshFilter != null) {
             for (int event : new int[] { SWT.Show, SWT.Skin, SWT.Settings, SWT.Activate, SWT.Selection }) {
                 display.removeFilter(event, refreshFilter);
             }
         }
-        if (themeManager != null && themeListener != null) { themeManager.removePropertyChangeListener(themeListener); }
+        if (themeManager != null && themeListener != null) {
+            themeManager.removePropertyChangeListener(themeListener);
+        }
+        WorkbenchThemeIntegration.restore();
         for (var entry : new ArrayList<>(ORIGINALS.entrySet())) {
             Control control = entry.getKey();
-            Original original = entry.getValue();
-            if (control.isDisposed()) { continue; }
+            final Original original = entry.getValue();
+            if (control.isDisposed()) {
+                continue;
+            }
             control.removeDisposeListener(DISPOSE);
+            if (control instanceof CTabFolder folder) {
+                folder.removePaintListener(TAB_HIGHLIGHT);
+            }
+            control.setBackground(live(original.background(), display, SWT.COLOR_WIDGET_BACKGROUND));
+            control.setForeground(live(original.foreground(), display, SWT.COLOR_WIDGET_FOREGROUND));
             if (control instanceof CTabFolder folder) {
                 folder.setSelectionBackground(live(original.selectedBackground(), display, SWT.COLOR_LIST_SELECTION));
                 folder.setSelectionForeground(live(original.selectedForeground(), display, SWT.COLOR_LIST_SELECTION_TEXT));
-            } else {
-                control.setBackground(live(original.background(), display, SWT.COLOR_WIDGET_BACKGROUND));
-                control.setForeground(live(original.foreground(), display, SWT.COLOR_WIDGET_FOREGROUND));
             }
-            if (reskin) { control.reskin(SWT.NONE); }
+            if (reskin) {
+                control.reskin(SWT.NONE);
+            }
             control.redraw();
         }
+        for (var entry : new ArrayList<>(TAB_ORIGINALS.entrySet())) {
+            CTabItem item = entry.getKey();
+            if (!item.isDisposed()) {
+                item.removeDisposeListener(TAB_DISPOSE);
+                item.setForeground(live(entry.getValue().foreground(), display, SWT.COLOR_WIDGET_FOREGROUND));
+                item.setSelectionForeground(live(entry.getValue().selected(), display, SWT.COLOR_LIST_SELECTION_TEXT));
+                if (reskin) {
+                    item.reskin(SWT.NONE);
+                }
+            }
+        }
+        WorkbenchTabMaterial.stop();
         // No native control may retain an owned Color when it is disposed.
-        for (Color color : COLORS.values()) { if (!color.isDisposed()) { color.dispose(); } }
+        for (Color color : COLORS.values()) {
+            if (!color.isDisposed())  {
+                color.dispose();
+            }
+        }
         clearReferences();
     }
 
-    private static void forgetDisposed(Display display) {
-        if (installedDisplay != display) { return; }
-        if (themeManager != null && themeListener != null) { themeManager.removePropertyChangeListener(themeListener); }
+    private static void forgetDisposed(@NotNull Display display) {
+        if (installedDisplay != display) {
+            return;
+        }
+        if (themeManager != null && themeListener != null) {
+            themeManager.removePropertyChangeListener(themeListener);
+        }
         clearReferences();
     }
 
     private static void clearReferences() {
         ORIGINALS.clear();
+        TAB_ORIGINALS.clear();
+        WorkbenchThemeIntegration.forgetDisposed();
         COLORS.clear();
         installedDisplay = null;
         activeAccent = null;
@@ -350,7 +494,8 @@ public final class WorkbenchAppearance {
         truncated = false;
     }
 
-    static String normalizeAccent(String value) {
+    @NotNull
+    static String normalizeAccent(@Nullable String value) {
         if (value == null || value.length() > 32) {
             throw new IllegalArgumentException("Use a supported accent name or #RRGGBB");
         }
@@ -374,9 +519,11 @@ public final class WorkbenchAppearance {
         return normalized.toUpperCase(Locale.ROOT);
     }
 
-    static record Palette(int accent, int selectionForeground, int chrome, int chromeForeground, boolean dark) { }
+    static record Palette(int accent, int selectionForeground, int chrome, int chromeForeground, boolean dark) {
+    }
 
-    static Palette palette(String accent, boolean dark) {
+    @NotNull
+    static Palette palette(@NotNull String accent, boolean dark) {
         int rgb = Integer.parseInt(accent.substring(1), 16);
         int chrome = mix(rgb, dark ? 0x202124 : 0xFFFFFF, dark ? 0.08 : 0.06);
         return new Palette(rgb, foreground(rgb), chrome, foreground(chrome), dark);
@@ -391,7 +538,7 @@ public final class WorkbenchAppearance {
         return result;
     }
 
-    private static int rgb(RGB rgb) {
+    private static int rgb(@NotNull RGB rgb) {
         return rgb.red << 16 | rgb.green << 8 | rgb.blue;
     }
 

@@ -20,6 +20,7 @@ package org.jkiss.dbeaver.ui.ai.workbench;
 import org.eclipse.core.commands.Command;
 import org.eclipse.ui.commands.ICommandService;
 import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIUtils;
 
@@ -74,7 +75,8 @@ final class NativeCapabilityCatalog {
         return new WorkbenchCapabilityCatalog(entries, truncated).query(terms, "", false, false, 40).toMap();
     }
 
-    private static String clip(String value, int limit) {
+    @NotNull
+    private static String clip(@Nullable String value, int limit) {
         if (value == null || value.isBlank()) {
             return "unspecified";
         }

@@ -16,11 +16,13 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+
 import java.util.Locale;
 
 /** Palette and input checks need no Display and do not change native appearance or preferences. */
 public final class WorkbenchAppearanceTest {
-    public static void main(String[] arguments) {
+    public static void main(@NotNull String[] arguments) {
         normalization();
         invalidInputs();
         contrast();
@@ -93,7 +95,9 @@ public final class WorkbenchAppearanceTest {
         check((blue.chrome() & 255) > (blue.chrome() >>> 16 & 255), "Blue chrome has no blue tint");
     }
 
-    private static void check(boolean condition, String message) {
-        if (!condition) { throw new AssertionError(message); }
+    private static void check(boolean condition, @NotNull String message) {
+        if (!condition) {
+            throw new AssertionError(message);
+        }
     }
 }

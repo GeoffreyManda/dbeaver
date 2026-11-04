@@ -19,6 +19,7 @@ package org.jkiss.dbeaver.ui.ai.workbench;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jkiss.code.NotNull;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
@@ -33,7 +34,7 @@ public final class WorkbenchResponseTest {
     private static final Gson GSON = new Gson();
     private static final String COVERAGE = "Visible controls; browser DOM and private values unknown";
 
-    public static void main(String[] args) {
+    public static void main(@NotNull String[] args) {
         normalMap();
         exactLimit();
         truncatedScene();
@@ -41,7 +42,7 @@ public final class WorkbenchResponseTest {
         invalidScenes();
     }
 
-    private static int bytes(String text) {
+    private static int bytes(@NotNull String text) {
         return text.getBytes(StandardCharsets.UTF_8).length;
     }
 
@@ -68,7 +69,8 @@ public final class WorkbenchResponseTest {
         expectLimit(() -> WorkbenchResponse.serialize(Map.of("text", unicode + "x")));
     }
 
-    private static Map<String, Object> payload(WorkbenchSceneGraph.Snapshot snapshot) {
+    @NotNull
+    private static Map<String, Object> payload(@NotNull WorkbenchSceneGraph.Snapshot snapshot) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("snapshotId", snapshot.id().toString());
         payload.put("observedAt", snapshot.observedAt().toString());
@@ -163,7 +165,7 @@ public final class WorkbenchResponseTest {
         expect(IllegalArgumentException.class, () -> WorkbenchResponse.serialize(payload));
     }
 
-    private static void expectLimit(Runnable action) {
+    private static void expectLimit(@NotNull Runnable action) {
         try {
             action.run();
         } catch (IllegalArgumentException error) {
@@ -173,15 +175,19 @@ public final class WorkbenchResponseTest {
         throw new AssertionError("Expected fixed response-limit failure");
     }
 
-    private static void check(boolean condition, String message) {
-        if (!condition) { throw new AssertionError(message); }
+    private static void check(boolean condition, @NotNull String message) {
+        if (!condition) {
+            throw new AssertionError(message);
+        }
     }
 
-    private static void expect(Class<? extends Throwable> expected, Runnable action) {
+    private static void expect(@NotNull Class<? extends Throwable> expected, @NotNull Runnable action) {
         try {
             action.run();
         } catch (Throwable error) {
-            if (expected.isInstance(error)) { return; }
+            if (expected.isInstance(error)) {
+                return;
+            }
             throw new AssertionError("Unexpected failure", error);
         }
         throw new AssertionError("Expected " + expected.getSimpleName());

@@ -16,6 +16,9 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -51,11 +54,13 @@ public final class WorkbenchCapabilityCatalog {
             }
         }
 
+        @NotNull
         public Map<String, Object> toMap() {
             return Map.of("id", id, "kind", kind, "category", category, "title", title,
                 "description", description, "readOnly", readOnly, "applicable", applicable, "risk", risk.name());
         }
 
+        @NotNull
         private String searchText() {
             return normalize(id + " " + kind + " " + category + " " + title + " " + description);
         }
@@ -84,17 +89,18 @@ public final class WorkbenchCapabilityCatalog {
             }
         }
 
+        @NotNull
         public Map<String, Object> toMap() {
             return Map.of("capabilities", capabilities.stream().map(Capability::toMap).toList(),
                 "matched", matched, "truncated", truncated);
         }
     }
 
-    public WorkbenchCapabilityCatalog(List<Capability> source) {
+    public WorkbenchCapabilityCatalog(@NotNull List<Capability> source) {
         this(source, false);
     }
 
-    public WorkbenchCapabilityCatalog(List<Capability> source, boolean truncated) {
+    public WorkbenchCapabilityCatalog(@NotNull List<Capability> source, boolean truncated) {
         Objects.requireNonNull(source);
         List<Capability> accepted = new ArrayList<>();
         Set<String> ids = new HashSet<>();
@@ -109,7 +115,8 @@ public final class WorkbenchCapabilityCatalog {
         sourceTruncated = truncated || source.size() > MAX_ENTRIES;
     }
 
-    public Result query(String terms, String category, boolean readOnlyOnly, boolean applicableOnly, int limit) {
+    @NotNull
+    public Result query(@NotNull String terms, @Nullable String category, boolean readOnlyOnly, boolean applicableOnly, int limit) {
         String normalized = normalize(text(terms, 256, true)).strip();
         String selectedCategory = category == null || category.isBlank() ? "" : normalize(text(category, 64, false));
         String[] tokens = normalized.isEmpty() ? new String[0] : normalized.split("(?U)\\s+");
@@ -148,11 +155,12 @@ public final class WorkbenchCapabilityCatalog {
         return new Result(selected, matched, truncated);
     }
 
-    private static String normalize(String value) {
+    @NotNull
+    private static String normalize(@NotNull String value) {
         return Normalizer.normalize(value, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
     }
 
-    private static int jsonBytes(String value) {
+    private static int jsonBytes(@NotNull String value) {
         int bytes = 2;
         for (int index = 0; index < value.length(); index++) {
             char c = value.charAt(index);
@@ -170,7 +178,8 @@ public final class WorkbenchCapabilityCatalog {
         return bytes;
     }
 
-    private static String text(String value, int maxLength, boolean emptyAllowed) {
+    @NotNull
+    private static String text(@NotNull String value, int maxLength, boolean emptyAllowed) {
         if (value == null || value.length() > maxLength || !emptyAllowed && value.isBlank()) {
             throw new IllegalArgumentException("Invalid catalogue metadata length");
         }

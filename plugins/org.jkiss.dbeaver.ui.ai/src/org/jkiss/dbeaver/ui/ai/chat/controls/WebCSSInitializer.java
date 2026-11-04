@@ -41,7 +41,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class WebCSSInitializer implements AutoCloseable {
@@ -49,10 +51,15 @@ public class WebCSSInitializer implements AutoCloseable {
     private static final String WEB_CSS_PATH = "styles.css";
     private static final String WEB_HTML_PATH = "index.html";
     private static final String EXTRA_HEAD_PLACEHOLDER = "<!--{{EXTRA_HEAD}}-->";
+    private static final Set<String> THEME_COLOR_KEYS = Set.of(
+        "BACKGROUND_COLOR", "BACKGROUND_COLOR_INACTIVE", "TEXT_COLOR", "PROMPT_BACKGROUND",
+        "PROMPT_BORDER", "WARNING_BACKGROUND", "ERROR_BACKGROUND", "HYPERLINK_COLOR", "BORDER_COLOR");
 
     private final LocalResourceHttpServer.Handle server;
     private final Map<String, String> resourceUrls = new HashMap<>();
     private volatile Map<String, String> cssValues;
+    private volatile Map<String, String> themeColors = Map.of();
+    private volatile Map<String, Object> designTokens = Map.of();
     private long themeRevision;
 
     public WebCSSInitializer() throws IOException {
@@ -84,6 +91,7 @@ public class WebCSSInitializer implements AutoCloseable {
                 resource,
                 LocalResourceHttpServer.Resource.of(url::openStream)
                     .map(this::updateThemeValues)
+                    .map(content -> content + designStyles(designTokens))
             );
             case WEB_HTML_PATH -> server.addTextResource(
                 resource,
@@ -108,6 +116,169 @@ public class WebCSSInitializer implements AutoCloseable {
     public void refreshTheme() {
         cssValues = fillValues();
         themeRevision++;
+    }
+
+    /** Returns immutable explicit color overrides; an empty map follows the native theme. */
+    @NotNull
+    public Map<String, String> getThemeColors() {
+        return themeColors;
+    }
+
+    /** Applies fixed color tokens only, preserving fonts, content and the native color-scheme choice. */
+    public void setThemeColors(@NotNull Map<String, String> colors) {
+        if (!UIUtils.isUIThread()) {
+            throw new IllegalStateException("Chat theme colors require the SWT display thread");
+        }
+        themeColors = validateThemeColors(colors);
+        refreshTheme();
+    }
+
+    /** Validates a palette without constructing a browser, stylesheet server or native control. */
+    @NotNull
+    public static Map<String, String> validateThemeColors(@NotNull Map<String, String> colors) {
+        if (colors == null || colors.size() > THEME_COLOR_KEYS.size()) {
+            throw new IllegalArgumentException("Invalid chat theme colors");
+        }
+        Map<String, String> validated = new HashMap<>();
+        for (var entry : colors.entrySet()) {
+            String value = entry.getValue();
+            if (entry.getKey() == null || !THEME_COLOR_KEYS.contains(entry.getKey())
+                || value == null || !value.matches("#[0-9a-fA-F]{6}")) {
+                throw new IllegalArgumentException("Chat theme accepts supported #RRGGBB colors only");
+            }
+            validated.put(entry.getKey(), value.toUpperCase(Locale.ROOT));
+        }
+        return Map.copyOf(validated);
+    }
+
+    /** Returns explicit material/layout tokens; empty follows the original chat design. */
+    @NotNull
+    public Map<String, Object> getDesignTokens() {
+        return designTokens;
+    }
+
+    /** Applies typed design tokens to the existing stylesheet without accepting CSS, URLs or script. */
+    public void setDesignTokens(@NotNull Map<String, Object> tokens) {
+        if (!UIUtils.isUIThread()) {
+            throw new IllegalStateException("Chat design tokens require the SWT display thread");
+        }
+        if (tokens == null) {
+            throw new IllegalArgumentException("Invalid design tokens");
+        }
+        designTokens = tokens.isEmpty() ? Map.of() : validateDesignTokens(tokens);
+        refreshTheme();
+    }
+
+    /** Describes the complete set of design tokens supported by this renderer. */
+    @NotNull
+    public static Map<String, Object> getDesignSchema() {
+        return Map.of(
+            "material", Map.of("type", "string", "values", List.of("flat", "glass"), "default", "flat"),
+            "density", Map.of("type", "string", "values", List.of("compact", "comfortable"), "default", "comfortable"),
+            "fontScale", Map.of("type", "number", "min", 0.85, "max", 1.3, "default", 1.0),
+            "radius", Map.of("type", "integer", "min", 0, "max", 20, "default", 8),
+            "opacity", Map.of("type", "number", "min", 0.02, "max", 0.2, "default", 0.02),
+            "blur", Map.of("type", "integer", "min", 0, "max", 8, "default", 0),
+            "iconTint", Map.of("type", "string", "format", "default or #RRGGBB", "default", "default",
+                "browser", "monochrome SQL action icons only"));
+    }
+
+    /** Validates without native controls. Defaults are optically clear and have no blur or animation. */
+    @NotNull
+    public static Map<String, Object> validateDesignTokens(@NotNull Map<String, Object> tokens) {
+        if (tokens == null || tokens.size() > 7 || !getDesignSchema().keySet().containsAll(tokens.keySet())) {
+            throw new IllegalArgumentException("Unsupported design token");
+        }
+        return Map.of("material", choice(tokens, "material", "flat", List.of("flat", "glass")),
+            "density", choice(tokens, "density", "comfortable", List.of("compact", "comfortable")),
+            "fontScale", numeric(tokens, "fontScale", 1.0, 0.85, 1.3),
+            "radius", integer(tokens, "radius", 8, 0, 20),
+            "opacity", numeric(tokens, "opacity", 0.02, 0.02, 0.2),
+            "blur", integer(tokens, "blur", 0, 0, 8), "iconTint", iconTint(tokens.getOrDefault("iconTint", "default")));
+    }
+
+    @NotNull
+    private static String iconTint(@Nullable Object value) {
+        if (value instanceof String text && (text.equals("default") || text.matches("#[0-9a-fA-F]{6}"))) {
+            return text.equals("default") ? text : text.toUpperCase(Locale.ROOT);
+        }
+        throw new IllegalArgumentException("Icon tint must be default or #RRGGBB");
+    }
+
+    @NotNull
+    private static String choice(@NotNull Map<String, Object> tokens, @NotNull String key,
+        @NotNull String fallback, @NotNull List<String> choices) {
+        Object value = tokens.getOrDefault(key, fallback);
+        if (!(value instanceof String text) || text.length() > 16 || !choices.contains(text.toLowerCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("Invalid design choice");
+        }
+        return text.toLowerCase(Locale.ROOT);
+    }
+
+    private static double numeric(@NotNull Map<String, Object> tokens, @NotNull String key,
+        double fallback, double min, double max) {
+        Object value = tokens.getOrDefault(key, fallback);
+        if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue())
+            || number.doubleValue() < min || number.doubleValue() > max) {
+            throw new IllegalArgumentException("Design number outside supported range");
+        }
+        return number.doubleValue();
+    }
+
+    private static int integer(@NotNull Map<String, Object> tokens, @NotNull String key,
+        int fallback, int min, int max) {
+        double value = numeric(tokens, key, fallback, min, max);
+        if (Math.rint(value) != value) {
+            throw new IllegalArgumentException("Design token must be an integer");
+        }
+        return (int) value;
+    }
+
+    /** Generates fixed material rules from validated primitives; this is not a CSS execution endpoint. */
+    @NotNull
+    public static String designStyles(@NotNull Map<String, Object> tokens) {
+        if (tokens.isEmpty()) {
+            return "";
+        }
+        Map<String, Object> values = validateDesignTokens(tokens);
+        int radius = (int) values.get("radius");
+        int gap = values.get("density").equals("compact") ? 3 : 7;
+        String rules = "\n#chat{gap:" + gap + "px;}\n.message{padding:" + gap + "px;}"
+            + ".message,.confirmation-card,.attachment,.sql-form{border-radius:" + radius + "px;}"
+            + ".confirmation-card{padding:" + (gap + 3) + "px;gap:" + gap + "px;}"
+            + iconStyles((String) values.get("iconTint"));
+        if (!values.get("material").equals("glass")) {
+            return rules;
+        }
+        String surfaces = "#chat-meta,.message.right,.confirmation-card,.attachment";
+        String opacity = values.get("opacity").toString();
+        int blur = (int) values.get("blur");
+        String filter = blur == 0 ? "none" : "blur(" + blur + "px)";
+        return rules + "\nhtml,body{background:transparent;}#chat-root{background:linear-gradient(135deg,"
+            + "color-mix(in srgb,var(--hyperlink-color) 6%,transparent),transparent 45%,"
+            + "color-mix(in srgb,var(--hyperlink-color) 3%,transparent));}"
+            + surfaces + "{background:color-mix(in srgb,var(--background-color) "
+            + (((Number) values.get("opacity")).doubleValue() * 100) + "%,transparent);"
+            + "border:1px solid rgba(255,255,255,.38);border-bottom-color:rgba(0,0,0,.10);"
+            + "border-radius:" + radius + "px;"
+            + "box-shadow:inset 0 1px 0 rgba(255,255,255,.58),inset 0 -1px 0 rgba(0,0,0,.05),"
+            + "0 3px 10px rgba(0,0,0,.08);"
+            + "backdrop-filter:" + filter + ";-webkit-backdrop-filter:" + filter + ";"
+            + "--workbench-surface-opacity:" + opacity + ";}"
+            + "@media(prefers-reduced-transparency:reduce){" + surfaces
+            + "{background:var(--background-color);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;}}";
+    }
+
+    @NotNull
+    private static String iconStyles(@NotNull String tint) {
+        if (tint.equals("default")) {
+            return ".sql-button-img{filter:none;}";
+        }
+        if (!tint.substring(1, 3).equals(tint.substring(3, 5)) || !tint.substring(1, 3).equals(tint.substring(5, 7))) {
+            return "";
+        }
+        double level = Integer.parseInt(tint.substring(1, 3), 16) / 255.0;
+        return ".sql-button-img{filter:grayscale(1) brightness(0) invert(" + level + ");}";
     }
 
     @NotNull
@@ -162,14 +333,15 @@ public class WebCSSInitializer implements AutoCloseable {
         String borderColor = colorToHex(Display.getDefault().getSystemColor(SWT.COLOR_WIDGET_NORMAL_SHADOW));
 
         FontData[] mainFont = BaseThemeSettings.instance.baseFont.getFontData();
-        String fontSize = getFontSize(mainFont);
+        double fontScale = designTokens.isEmpty() ? 1.0 : ((Number) designTokens.get("fontScale")).doubleValue();
+        String fontSize = getFontSize(mainFont, fontScale);
         String fontFamily = getFontFamily(mainFont, "Arial");
 
         FontData[] monoFont = BaseThemeSettings.instance.monospaceFont.getFontData();
-        String monoFontSize = getFontSize(monoFont);
+        String monoFontSize = getFontSize(monoFont, fontScale);
         String monoFontFamily = getFontFamily(monoFont, "monospace");
 
-        return Map.ofEntries(
+        Map<String, String> values = new HashMap<>(Map.ofEntries(
             Map.entry("{{BACKGROUND_COLOR}}", chatBackground),
             Map.entry("{{BACKGROUND_COLOR_INACTIVE}}", chatInactiveBackground),
             Map.entry("{{TEXT_COLOR}}", textColor),
@@ -184,14 +356,16 @@ public class WebCSSInitializer implements AutoCloseable {
             Map.entry("{{HYPERLINK_COLOR}}", hyperLinkColor),
             Map.entry("{{BORDER_COLOR}}", borderColor),
             Map.entry("{{COLOR_SCHEME}}", themeSchema)
-        );
+        ));
+        themeColors.forEach((key, value) -> values.put("{{" + key + "}}", value));
+        return Map.copyOf(values);
     }
 
     @NotNull
-    private static String getFontSize(@NotNull FontData[] mainFont) {
+    private static String getFontSize(@NotNull FontData[] mainFont, double scale) {
         String unit = RuntimeUtils.isMacOS() ? "px" : "pt";
         int height = mainFont.length > 0 ? mainFont[0].getHeight() : 13;
-        return height + unit;
+        return scale == 1.0 ? height + unit : String.format(Locale.ROOT, "%.2f%s", height * scale, unit);
     }
 
     @NotNull

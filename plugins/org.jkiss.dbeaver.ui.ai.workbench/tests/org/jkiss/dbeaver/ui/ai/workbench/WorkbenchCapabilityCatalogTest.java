@@ -16,13 +16,15 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import org.jkiss.code.NotNull;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 public final class WorkbenchCapabilityCatalogTest {
-    public static void main(String[] arguments) {
+    public static void main(@NotNull String[] arguments) {
         filtering();
         unicode();
         boundedResults();
@@ -30,8 +32,9 @@ public final class WorkbenchCapabilityCatalogTest {
         riskAndMetadata();
     }
 
-    private static WorkbenchCapabilityCatalog.Capability entry(String id, String category, String title,
-        boolean readOnly, boolean applicable, WorkbenchCapabilityCatalog.Risk risk) {
+    @NotNull
+    private static WorkbenchCapabilityCatalog.Capability entry(@NotNull String id, @NotNull String category, @NotNull String title,
+        boolean readOnly, boolean applicable, @NotNull WorkbenchCapabilityCatalog.Risk risk) {
         return new WorkbenchCapabilityCatalog.Capability(id, "command", category, title, "", readOnly, applicable, risk);
     }
 
@@ -53,7 +56,7 @@ public final class WorkbenchCapabilityCatalogTest {
             Locale.setDefault(Locale.forLanguageTag("tr-TR"));
             var capability = entry("INSPECT", "géométrie", "ÉCOLE خريطة 地図 🗺", true, true, WorkbenchCapabilityCatalog.Risk.READ_ONLY);
             var catalog = new WorkbenchCapabilityCatalog(List.of(capability));
-            check(catalog.query("inspect e\u0301cole خريطة 地図", "GE\u0301OME\u0301TRIE", true, true, 10).matched() == 1,
+            check(catalog.query("inspect école خريطة 地図", "GÉOMÉTRIE", true, true, 10).matched() == 1,
                 "Unicode/locale search");
             check(catalog.query("ÉCOLE\u2003خريطة", null, false, false, 10).matched() == 1, "Unicode whitespace");
         } finally {
@@ -77,7 +80,8 @@ public final class WorkbenchCapabilityCatalogTest {
                 "\u0000".repeat(512), true, true, WorkbenchCapabilityCatalog.Risk.READ_ONLY));
         }
         var byteLimited = new WorkbenchCapabilityCatalog(longEntries).query("", null, false, false, 100);
-        check(byteLimited.capabilities().size() < 100 && byteLimited.matched() == 100 && byteLimited.truncated(), "Byte budget not applied");
+        check(byteLimited.capabilities().size() < 100 && byteLimited.matched() == 100 && byteLimited.truncated(),
+            "Byte budget not applied");
         check(new WorkbenchCapabilityCatalog(List.of(), true).query("", null, false, false, 1).truncated(), "Upstream truncation lost");
     }
 
@@ -99,21 +103,25 @@ public final class WorkbenchCapabilityCatalogTest {
         var unknown = entry("unknown", "native", "Unclassified command", false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN);
         check(new WorkbenchCapabilityCatalog(List.of(unknown)).query("", null, true, false, 10).matched() == 0, "Unknown risk admitted");
         check(unknown.toMap().get("risk").equals("UNKNOWN"), "Risk omitted from response");
-        expect(IllegalArgumentException.class, () -> entry("bad", "data", "Bad", true, true, WorkbenchCapabilityCatalog.Risk.DATABASE_WRITE));
-        expect(IllegalArgumentException.class, () -> entry("x".repeat(129), "data", "Bad", false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
-        expect(IllegalArgumentException.class, () -> entry("id", "data", "x".repeat(161), false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
-        expect(IllegalArgumentException.class, () -> entry("id", "data", "\uD800", false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
+        expect(IllegalArgumentException.class,
+            () -> entry("bad", "data", "Bad", true, true, WorkbenchCapabilityCatalog.Risk.DATABASE_WRITE));
+        expect(IllegalArgumentException.class,
+            () -> entry("x".repeat(129), "data", "Bad", false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
+        expect(IllegalArgumentException.class,
+            () -> entry("id", "data", "x".repeat(161), false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
+        expect(IllegalArgumentException.class,
+            () -> entry("id", "data", "\uD800", false, true, WorkbenchCapabilityCatalog.Risk.UNKNOWN));
         expect(IllegalArgumentException.class, () -> new WorkbenchCapabilityCatalog(List.of(unknown, unknown)));
         expect(IllegalArgumentException.class, () -> new WorkbenchCapabilityCatalog(List.of()).query("", null, false, false, 0));
     }
 
-    private static void check(boolean condition, String message) {
+    private static void check(boolean condition, @NotNull String message) {
         if (!condition) {
             throw new AssertionError(message);
         }
     }
 
-    private static void expect(Class<? extends Throwable> expected, Runnable action) {
+    private static void expect(@NotNull Class<? extends Throwable> expected, @NotNull Runnable action) {
         try {
             action.run();
         } catch (Throwable error) {

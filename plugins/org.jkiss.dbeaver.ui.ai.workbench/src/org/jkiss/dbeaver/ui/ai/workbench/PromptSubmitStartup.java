@@ -26,6 +26,7 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.ui.IStartup;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.ai.chat.controls.AIChatControl;
 import org.jkiss.dbeaver.ui.ai.chat.controls.AIPromptStyledText;
@@ -108,7 +109,7 @@ public final class PromptSubmitStartup implements IStartup {
         }
     }
 
-    private static void removeHooks(Display display) {
+    private static void removeHooks(@NotNull Display display) {
         if (installedDisplay != display) {
             return;
         }
@@ -137,7 +138,7 @@ public final class PromptSubmitStartup implements IStartup {
         installedDisplay = null;
     }
 
-    private static void keyDown(Event event) {
+    private static void keyDown(@NotNull Event event) {
         if (!(event.widget instanceof AIPromptStyledText prompt) || !prompt.isFocusControl()) {
             return;
         }
@@ -158,7 +159,7 @@ public final class PromptSubmitStartup implements IStartup {
         return !composing && modifiers == 0 && (keyCode == SWT.CR || keyCode == SWT.KEYPAD_CR);
     }
 
-    private static void installExistingHints(Composite parent, int depth) {
+    private static void installExistingHints(@NotNull Composite parent, int depth) {
         if (depth > 20 || HINTS.size() >= MAX_HINTS) {
             return;
         }
@@ -171,7 +172,7 @@ public final class PromptSubmitStartup implements IStartup {
         }
     }
 
-    private static void installHint(AIPromptStyledText prompt) {
+    private static void installHint(@NotNull AIPromptStyledText prompt) {
         if (prompt.isDisposed() || prompt.getData(HINT_KEY) != null || HINTS.size() >= MAX_HINTS) {
             return;
         }

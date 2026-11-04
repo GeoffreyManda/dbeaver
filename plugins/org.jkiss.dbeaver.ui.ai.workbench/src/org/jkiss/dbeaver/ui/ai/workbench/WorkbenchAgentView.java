@@ -29,6 +29,7 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.part.ViewPart;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.model.ai.AIConstants;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 
@@ -44,6 +45,7 @@ public final class WorkbenchAgentView extends ViewPart {
     private static final ResourceBundle TEXT = ResourceBundle.getBundle(
         "org.jkiss.dbeaver.ui.ai.workbench.messages");
     private static final Map<String, String> TEMPLATES = new LinkedHashMap<>();
+
     static {
         TEMPLATES.put("template.quality", "sql/data-quality.sql");
         TEMPLATES.put("template.python", "python/profile_csv.py");
@@ -51,10 +53,11 @@ public final class WorkbenchAgentView extends ViewPart {
         TEMPLATES.put("template.incremental", "python/incremental_load.py");
         TEMPLATES.put("template.delta", "sql/databricks-delta.sql");
     }
+
     private CTabFolder tabs;
 
     @Override
-    public void createPartControl(Composite parent) {
+    public void createPartControl(@NotNull Composite parent) {
         parent.setLayout(new GridLayout(1, false));
         tabs = new CTabFolder(parent, SWT.BORDER);
         tabs.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
@@ -98,16 +101,34 @@ public final class WorkbenchAgentView extends ViewPart {
             button(choices, entry.getKey(), () -> content.setText(resource("resources/templates/" + entry.getValue())));
         }
         content.setText(resource("resources/tutorials/agentic-tutorials.md"));
+        Composite sourcePage = page("source");
+        Label sourceNote = new Label(sourcePage, SWT.WRAP);
+        sourceNote.setText(text("source.note"));
+        sourceNote.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+        button(sourcePage, "source.choose", () -> {
+            var dialog = new org.eclipse.swt.widgets.DirectoryDialog(getSite().getShell());
+            dialog.setText(text("source.workspace.title"));
+            dialog.setMessage(text("source.workspace.message"));
+            String selected = dialog.open();
+            if (selected != null) {
+                try {
+                    WorkbenchSourceTools.choose(java.nio.file.Path.of(selected));
+                } catch (Exception e) {
+                    status(sourcePage, text("source.workspace.error"));
+                }
+            }
+        });
         tabs.setSelection(0);
     }
 
-    private Composite page(String key) {
+    @NotNull
+    private Composite page(@NotNull String key) {
         CTabItem item = new CTabItem(tabs, SWT.NONE);
         item.setText(text(key));
         ScrolledComposite scroll = new ScrolledComposite(tabs, SWT.V_SCROLL);
         scroll.setExpandHorizontal(true);
         scroll.setExpandVertical(true);
-        Composite body = new Composite(scroll, SWT.NONE);
+        final Composite body = new Composite(scroll, SWT.NONE);
         GridLayout layout = new GridLayout(1, false);
         layout.marginWidth = 16;
         layout.marginHeight = 16;
@@ -122,7 +143,7 @@ public final class WorkbenchAgentView extends ViewPart {
         return body;
     }
 
-    private static void responsiveColumns(Composite row, int maximum) {
+    private static void responsiveColumns(@NotNull Composite row, int maximum) {
         row.addListener(SWT.Resize, event -> {
             int columns = Math.max(1, Math.min(maximum, row.getClientArea().width / 260));
             GridLayout layout = (GridLayout) row.getLayout();
@@ -133,13 +154,13 @@ public final class WorkbenchAgentView extends ViewPart {
         });
     }
 
-    private void button(Composite parent, String key, Runnable action) {
+    private void button(@NotNull Composite parent, @NotNull String key, @NotNull Runnable action) {
         Button button = new Button(parent, SWT.PUSH);
         button.setText(text(key));
         button.addListener(SWT.Selection, event -> action.run());
     }
 
-    private void command(String id) {
+    private void command(@NotNull String id) {
         try {
             IHandlerService service = getSite().getService(IHandlerService.class);
             if (service == null) {
@@ -151,15 +172,17 @@ public final class WorkbenchAgentView extends ViewPart {
         }
     }
 
-    private void status(Composite parent, String message) {
+    private void status(@NotNull Composite parent, @NotNull String message) {
         getViewSite().getActionBars().getStatusLineManager().setErrorMessage(message);
     }
 
-    private static String text(String key) {
+    @NotNull
+    private static String text(@NotNull String key) {
         return TEXT.getString(key);
     }
 
-    private static String resource(String name) {
+    @NotNull
+    private static String resource(@NotNull String name) {
         try (var stream = WorkbenchAgentView.class.getClassLoader().getResourceAsStream(name)) {
             if (stream == null) {
                 return text("resource.missing");

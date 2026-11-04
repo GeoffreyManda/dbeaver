@@ -18,6 +18,7 @@
 package org.jkiss.dbeaver.ui.ai.workbench;
 
 import com.google.gson.JsonParser;
+import org.jkiss.code.NotNull;
 import org.jkiss.dbeaver.DBException;
 import org.jkiss.dbeaver.model.ai.AIFunctionContext;
 import org.jkiss.dbeaver.model.ai.prompt.AIPromptGenerateSql;
@@ -28,7 +29,7 @@ import java.util.Map;
 
 /** Public-source smoke is opt-in; default tests make no network requests. */
 public final class OfficialDocumentationTest {
-    public static void main(String[] args) throws Exception {
+    public static void main(@NotNull String[] args) throws Exception {
         var function = new SearchOfficialDocumentationFunction();
         boolean[] canceled = {false};
         var monitor = new VoidProgressMonitor() {

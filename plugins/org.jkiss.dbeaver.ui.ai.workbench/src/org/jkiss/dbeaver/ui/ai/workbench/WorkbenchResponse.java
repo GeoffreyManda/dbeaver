@@ -17,6 +17,8 @@
 package org.jkiss.dbeaver.ui.ai.workbench;
 
 import com.google.gson.Gson;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -38,7 +40,7 @@ public final class WorkbenchResponse {
 
     private WorkbenchResponse() { }
 
-    public record Response(String json, String snapshotId, Set<String> disclosedNodes) {
+    public record Response(@NotNull String json, @Nullable String snapshotId, @NotNull Set<String> disclosedNodes) {
         public Response {
             Objects.requireNonNull(json);
             disclosedNodes = Set.copyOf(disclosedNodes);
@@ -51,7 +53,8 @@ public final class WorkbenchResponse {
         }
     }
 
-    public static Response serialize(Map<String, Object> payload) {
+    @NotNull
+    public static Response serialize(@NotNull Map<String, Object> payload) {
         if (payload == null) {
             throw new IllegalArgumentException(INVALID);
         }
@@ -92,7 +95,8 @@ public final class WorkbenchResponse {
 
     private record Scene(String id, List<WorkbenchSceneGraph.Node> nodes, List<WorkbenchSceneGraph.Edge> edges) { }
 
-    private static Scene scene(Map<String, Object> payload) {
+    @NotNull
+    private static Scene scene(@NotNull Map<String, Object> payload) {
         if (!(payload.get("snapshotId") instanceof String id) || id.isBlank() || id.length() > 128
             || !(payload.get("nodes") instanceof List<?> rawNodes) || rawNodes.isEmpty()
             || rawNodes.size() > WorkbenchSceneGraph.MAX_NODES
@@ -118,7 +122,8 @@ public final class WorkbenchResponse {
         return new Scene(id, List.copyOf(nodes), List.copyOf(edges));
     }
 
-    private static Set<String> ids(List<WorkbenchSceneGraph.Node> nodes) {
+    @NotNull
+    private static Set<String> ids(@NotNull List<WorkbenchSceneGraph.Node> nodes) {
         Set<String> ids = new LinkedHashSet<>();
         for (WorkbenchSceneGraph.Node node : nodes) {
             ids.add(node.id());
@@ -126,11 +131,13 @@ public final class WorkbenchResponse {
         return ids;
     }
 
-    private static Response response(String json, Scene scene, List<WorkbenchSceneGraph.Node> nodes) {
+    @NotNull
+    private static Response response(@NotNull String json, @Nullable Scene scene, @NotNull List<WorkbenchSceneGraph.Node> nodes) {
         return new Response(json, scene == null ? null : scene.id(), ids(nodes));
     }
 
-    private static String encode(Map<String, Object> payload) {
+    @NotNull
+    private static String encode(@NotNull Map<String, Object> payload) {
         BoundedWriter writer = new BoundedWriter();
         GSON.toJson(payload, writer);
         String json = writer.text.toString();
@@ -141,7 +148,9 @@ public final class WorkbenchResponse {
     }
 
     private static final class TooLarge extends RuntimeException {
-        private TooLarge() { super(null, null, false, false); }
+        private TooLarge() {
+            super(null, null, false, false);
+        }
     }
 
     /** Every UTF-16 code unit costs at least one UTF-8 byte, so this also bounds interim storage. */
@@ -149,14 +158,14 @@ public final class WorkbenchResponse {
         private final StringBuilder text = new StringBuilder();
 
         @Override
-        public void write(char[] source, int offset, int length) {
+        public void write(@NotNull char[] source, int offset, int length) {
             Objects.checkFromIndexSize(offset, length, source.length);
             check(length);
             text.append(source, offset, length);
         }
 
         @Override
-        public void write(String source, int offset, int length) {
+        public void write(@NotNull String source, int offset, int length) {
             Objects.checkFromIndexSize(offset, length, source.length());
             check(length);
             text.append(source, offset, offset + length);
@@ -168,7 +177,10 @@ public final class WorkbenchResponse {
             }
         }
 
-        @Override public void flush() { }
-        @Override public void close() { }
+        @Override
+        public void flush() { }
+
+        @Override
+        public void close() { }
     }
 }

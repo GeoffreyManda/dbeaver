@@ -31,6 +31,8 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Spinner;
 import org.eclipse.swt.widgets.Text;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
@@ -58,7 +60,7 @@ public final class NativeSceneInspector {
     private record Pending(Control control, String parentId, int depth) { }
 
     /** Appends metadata to a graph that already contains the workbench root. No UI actions occur. */
-    public static void append(WorkbenchSceneGraph.Builder graph) {
+    public static void append(@NotNull WorkbenchSceneGraph.Builder graph) {
         Objects.requireNonNull(graph);
         Display display = Display.getCurrent();
         if (display == null || display.isDisposed()) {
@@ -118,12 +120,13 @@ public final class NativeSceneInspector {
         }
     }
 
-    private static boolean isInput(Control control) {
+    private static boolean isInput(@NotNull Control control) {
         return control instanceof Text || control instanceof StyledText || control instanceof Combo
             || control instanceof CCombo || control instanceof Spinner || control instanceof DateTime;
     }
 
-    private static Map<String, Object> properties(Control control, boolean input, boolean browser) {
+    @NotNull
+    private static Map<String, Object> properties(@NotNull Control control, boolean input, boolean browser) {
         Map<String, Object> properties = new LinkedHashMap<>();
         String className = control.getClass().getSimpleName();
         int classEnd = Math.min(className.length(), 128);
@@ -162,7 +165,8 @@ public final class NativeSceneInspector {
         return properties;
     }
 
-    private static String known(String text, Set<String> whitelist) {
+    @Nullable
+    private static String known(@Nullable String text, @NotNull Set<String> whitelist) {
         if (text == null || text.length() > 64) {
             return null;
         }

@@ -35,9 +35,11 @@ abstract class WorkbenchFunction implements AIFunction {
     private static final int UI_TIMEOUT_SECONDS = 10;
     private final Operation operation;
 
-    enum Operation { OBSERVE, ACTIVATE, PRESENTATION, CATALOG, APPEARANCE }
+    enum Operation {
+        OBSERVE, ACTIVATE, PRESENTATION, CATALOG, APPEARANCE, DESIGN
+    }
 
-    WorkbenchFunction(Operation operation) {
+    WorkbenchFunction(@NotNull Operation operation) {
         this.operation = operation;
     }
 
@@ -65,6 +67,7 @@ abstract class WorkbenchFunction implements AIFunction {
                     case OBSERVE -> WorkbenchTools.observe();
                     case CATALOG -> NativeCapabilityCatalog.query(query);
                     case APPEARANCE -> WorkbenchAppearance.apply(accent);
+                    case DESIGN -> WorkbenchDesign.execute(parameters);
                     case ACTIVATE, PRESENTATION -> WorkbenchTools.act(snapshotId, nodeId,
                         operation == Operation.PRESENTATION);
                 });
@@ -83,16 +86,6 @@ abstract class WorkbenchFunction implements AIFunction {
         }
         try {
             var result = future.get(UI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (operation == Operation.APPEARANCE) {
-                String applied = String.valueOf(result.get("accent"));
-                String message = "default".equals(applied) ? "Restored the original app colors."
-                    : "Applied " + ("#2563EB".equals(applied) ? "blue"
-                        : "#FF0000".equals(applied) ? "red"
-                        : "#008000".equals(applied) ? "green"
-                        : "#FFD700".equals(applied) ? "gold" : applied)
-                        + " across the native interface.";
-                return new AIFunctionResult(AIFunctionType.ACTION, message);
-            }
             var response = WorkbenchResponse.serialize(result);
             if (response.snapshotId() != null) {
                 WorkbenchTools.disclose(response.snapshotId(), response.disclosedNodes());
@@ -101,6 +94,12 @@ abstract class WorkbenchFunction implements AIFunction {
             // evidence for a normal, localized assistant reply after the action.
             return new AIFunctionResult(AIFunctionType.INFORMATION,
                 response.json());
+        } catch (java.util.concurrent.ExecutionException e) {
+            future.cancel(false);
+            if (e.getCause() instanceof IllegalArgumentException invalid) {
+                throw new DBException(invalid.getMessage());
+            }
+            throw new DBException("Workbench operation failed; observe current state before retrying", e);
         } catch (InterruptedException e) {
             future.cancel(false);
             Thread.currentThread().interrupt();
@@ -113,7 +112,7 @@ abstract class WorkbenchFunction implements AIFunction {
 
     @NotNull
     private static String parameter(@NotNull Map<String, Object> parameters, @NotNull String name)
-        throws DBException {
+            throws DBException {
         Object value = parameters.get(name);
         if (!(value instanceof String text) || text.isBlank() || text.length() > 128) {
             throw new DBException("Missing or invalid workbench parameter: " + name);
