@@ -36,6 +36,7 @@ import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.ui.UIStyles;
+import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.ai.chat.controls.AIPromptStyledText;
 import org.jkiss.dbeaver.ui.ai.chat.controls.WebViewMessageList;
 
@@ -244,6 +245,7 @@ public final class WorkbenchAppearance {
             }
             queue.addLast(shell);
         }
+        WorkbenchDiagramTheme.apply(UIUtils.getColorRegistry(), activePalette);
         int scanned = 0;
         while (!queue.isEmpty()) {
             if (++scanned > MAX_SCAN) {
@@ -425,6 +427,7 @@ public final class WorkbenchAppearance {
         if (themeManager != null && themeListener != null) {
             themeManager.removePropertyChangeListener(themeListener);
         }
+        WorkbenchDiagramTheme.restore();
         WorkbenchThemeIntegration.restore();
         for (var entry : new ArrayList<>(ORIGINALS.entrySet())) {
             Control control = entry.getKey();
@@ -481,6 +484,7 @@ public final class WorkbenchAppearance {
     private static void clearReferences() {
         ORIGINALS.clear();
         TAB_ORIGINALS.clear();
+        WorkbenchDiagramTheme.forget();
         WorkbenchThemeIntegration.forgetDisposed();
         COLORS.clear();
         installedDisplay = null;
