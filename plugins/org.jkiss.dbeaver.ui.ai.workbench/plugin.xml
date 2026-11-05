@@ -20,10 +20,10 @@
             <parameter name="nodeId" required="true" type="string" description="Exact editor or view node ID from that snapshot"/>
         </function>
         <function id="actOnNativeControl" name="%nativeControl.name" class="org.jkiss.dbeaver.ui.ai.workbench.ActOnNativeControlFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
-            description="Operate a visible native SWT control from observeWorkbench. Focus an enabled non-password input in the active main window, or select a native tab node by index. Returns fresh observed state after verifying the change. Dialogs and embedded browsers are excluded.">
+            description="Operate a visible native SWT control from observeWorkbench. Focus an enabled non-password input in the active main window, or select a native tab node by index. Navigate a visible embedded browser with its existing back or forward history. Browser actions report acceptance and do not inspect the page. Dialogs are excluded.">
             <parameter name="snapshotId" required="true" type="string" description="Exact snapshot ID from observeWorkbench"/>
-            <parameter name="nodeId" required="true" type="string" description="Exact native input or tab node ID"/>
-            <parameter name="operation" required="true" type="string" description="focus or select-tab"/>
+            <parameter name="nodeId" required="true" type="string" description="Exact native input, tab or browser node ID"/>
+            <parameter name="operation" required="true" type="string" description="focus, select-tab, browser-back or browser-forward"/>
         </function>
         <function id="selectResultPresentation" name="%presentation.name" class="org.jkiss.dbeaver.ui.ai.workbench.SelectResultPresentationFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
             description="Select an already available presentation of the observed fetched result. Does not fetch rows, execute SQL, convert geometry or change CRS. Returns fresh state, not a claim of visual verification.">
@@ -47,9 +47,10 @@
             <parameter name="accent" required="true" type="string" description="Requested color: blue, a six-digit #RRGGBB color, or default to reset"/>
         </function>
         <function id="navigateWorkbench" name="Open workbench destination" class="org.jkiss.dbeaver.ui.ai.workbench.WorkbenchNavigationFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
-            description="Open native database navigator, project explorer, AI workbench, preferences or new connection wizard. Also opens an ER diagram or requests a registered native command. Search capabilities for an exact command ID. Registered commands require native confirmation and run in the current selection. Observe afterward to verify outcomes.">
-            <parameter name="destination" required="true" type="string" description="database-navigator, project-explorer, ai-workbench, preferences, new-connection, er-diagram inspect-command or registered-command. For er-diagram use one selected table or table container in Database Navigator."/>
+            description="Open native database navigator, project explorer, AI workbench, preferences or new connection wizard. Also opens an ER diagram and creates reusable named tools from registered native commands for this app session. Search capabilities for an exact command ID. Registered commands require native confirmation and run in the current selection. Observe afterward to verify outcomes.">
+            <parameter name="destination" required="true" type="string" description="database-navigator, project-explorer, ai-workbench, preferences, new-connection, er-diagram, inspect-command, registered-command, create-tool, list-tools or run-tool. For er-diagram use one selected table or table container in Database Navigator."/>
             <parameter name="commandId" type="string" description="Exact DBeaver command ID discovered by capability search. Required for inspect-command and registered-command. Use inspect-command first to get declared parameter IDs."/>
+            <parameter name="toolName" type="string" description="Lowercase reusable tool name for create-tool or run-tool. Create with a discovered commandId. Run supplies arguments at call time and requires the same native confirmation as a direct command."/>
             <parameter name="commandArguments" type="string" description="Optional JSON object mapping declared command parameter IDs to string values. Omit for commands without parameters."/>
         </function>
         <function id="sourceWorkspace" name="Choose addon source workspace" class="org.jkiss.dbeaver.ui.ai.workbench.SourceWorkspaceFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"

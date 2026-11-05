@@ -154,7 +154,7 @@ final class WorkbenchTools {
         // Consume the token before acting; failed or repeated calls must observe again.
         clearObservation();
         if (!nativeOperation.isEmpty()) {
-            var action = state.nativeActions().get(nodeId);
+            var action = state.nativeActions().getOrDefault(nodeId, state.nativeActions().get(nodeId + ":" + nativeOperation));
             if (action == null || !action.operation().equals(nativeOperation) || !action.perform().getAsBoolean()) {
                 throw new DBException("Native control unavailable or action could not be verified; observe again");
             }
@@ -177,6 +177,11 @@ final class WorkbenchTools {
                 throw new DBException("Observed part is closed or not instantiated; observe again");
             }
             state.page().activate(ref.getPart(false));
+        }
+        if (nativeOperation.startsWith("browser-")) {
+            var result = new LinkedHashMap<>(observe());
+            result.put("browserNavigationAccepted", true);
+            return result;
         }
         return observe();
     }

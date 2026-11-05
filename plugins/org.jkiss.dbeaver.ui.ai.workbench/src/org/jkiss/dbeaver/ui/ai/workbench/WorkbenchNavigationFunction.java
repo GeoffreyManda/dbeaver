@@ -21,6 +21,7 @@ import org.jkiss.dbeaver.model.ai.AIFunctionContext;
 import org.jkiss.dbeaver.model.ai.AIFunctionResult;
 import org.jkiss.dbeaver.model.ai.AIFunctionType;
 import org.jkiss.dbeaver.ui.UIUtils;
+import org.jkiss.dbeaver.ui.editors.MultiPageAbstractEditor;
 
 import java.io.StringReader;
 import java.util.LinkedHashMap;
@@ -32,6 +33,10 @@ import java.util.concurrent.TimeUnit;
 public final class WorkbenchNavigationFunction implements AIFunction {
     private static final String ER_DIAGRAM = "er-diagram";
     private static final String VIEW_DIAGRAM = "org.jkiss.dbeaver.erd.diagram.view";
+
+    // Named tools live for this app session. Store command IDs only, never arguments or connection data.
+    private static final Map<String, String> RECIPES = new LinkedHashMap<>();
+    private static final int MAX_RECIPES = 32;
 
     static final Map<String, String> VIEWS = Map.of(
         "database-navigator", "org.jkiss.dbeaver.core.databaseNavigator",
@@ -49,7 +54,8 @@ public final class WorkbenchNavigationFunction implements AIFunction {
         if (!(value instanceof String destination) ||
             !(VIEWS.containsKey(destination) || destination.equals("preferences")
                 || destination.equals("new-connection") || destination.equals(ER_DIAGRAM) || (destination.equals("registered-command")
-                    || destination.equals("inspect-command")))) {
+                    || destination.equals("inspect-command") || destination.equals("create-tool")
+                    || destination.equals("run-tool") || destination.equals("list-tools")))) {
             throw new DBException("Choose a destination listed in the tool schema");
         }
         CompletableFuture<String> future = new CompletableFuture<>();
@@ -63,11 +69,26 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                 if (window == null || window.getActivePage() == null) {
                     throw new DBException("No active workbench");
                 }
+                boolean runRecipe = destination.equals("run-tool");
+                boolean createRecipe = destination.equals("create-tool");
+                if (destination.equals("list-tools")) {
+                    future.complete(RECIPES.toString());
+                    return;
+                }
+                String recipe = "";
+                if (runRecipe || createRecipe) {
+                    if (!(parameters.get("toolName") instanceof String name) || !name.matches("[a-z][a-z0-9-]{0,47}")) {
+                        throw new DBException("Supply a lowercase tool name with letters, digits or hyphens");
+                    }
+                    recipe = name;
+                }
                 if (VIEWS.containsKey(destination)) {
                     window.getActivePage().showView(VIEWS.get(destination));
                     future.complete("Opened " + destination.replace('-', ' ') + ".");
-                } else if (destination.equals("registered-command") || destination.equals("inspect-command")) {
-                    if (!(commandId instanceof String id) || !id.matches("org\\.jkiss\\.dbeaver\\.[A-Za-z0-9_.-]{1,100}")) {
+                } else if (destination.equals("registered-command") || destination.equals("inspect-command")
+                    || createRecipe || runRecipe) {
+                    Object target = runRecipe ? RECIPES.get(recipe) : commandId;
+                    if (!(target instanceof String id) || !id.matches("org\\.jkiss\\.dbeaver\\.[A-Za-z0-9_.-]{1,100}")) {
                         throw new DBException("Supply an exact DBeaver command ID from capability search");
                     }
                     var commands = window.getService(ICommandService.class);
@@ -81,6 +102,14 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     }
                     if (destination.equals("inspect-command")) {
                         future.complete(describe(command));
+                        return;
+                    }
+                    if (createRecipe) {
+                        if (RECIPES.containsKey(recipe) || RECIPES.size() >= MAX_RECIPES) {
+                            throw new DBException("Tool name already exists or the session tool catalog is full");
+                        }
+                        RECIPES.put(recipe, id);
+                        future.complete("Created session tool " + recipe + ". Use run-tool with that name. " + describe(command));
                         return;
                     }
                     if (!command.isHandled() || !command.isEnabled()) {
@@ -135,7 +164,12 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     }
                     page.activate(page.showView(navigatorId));
                     service.executeCommand(VIEW_DIAGRAM, null);
-                    future.complete("Requested DBeaver's View Diagram for the selected object. Observe the workbench to verify it opened.");
+                    var editor = page.getActiveEditor();
+                    var diagram = editor instanceof MultiPageAbstractEditor multipage ? multipage.getActiveEditor() : editor;
+                    if (diagram == null || !diagram.getClass().getName().startsWith("org.jkiss.dbeaver.ui.editors.erd.editor.")) {
+                        throw new DBException("View Diagram returned without activating a diagram editor. Observe the workbench.");
+                    }
+                    future.complete("Opened the ER diagram editor for the selected Database Navigator object.");
                 } else {
                     // Complete before a modal native wizard enters its event loop.
                     var service = window.getService(IHandlerService.class);

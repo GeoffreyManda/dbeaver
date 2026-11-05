@@ -101,6 +101,15 @@ public final class NativeSceneInspector {
             String type = control instanceof Shell ? "shell" : browser ? "browser"
                 : control instanceof Button ? "button" : input ? "input" : "control";
             Map<String, Object> properties = properties(control, input, browser);
+            if (control instanceof Browser embedded && available(embedded, mainShell)) {
+                properties.put("operations", java.util.List.of("browser-back", "browser-forward"));
+                properties.put("history", Map.of("backEnabled", embedded.isBackEnabled(),
+                    "forwardEnabled", embedded.isForwardEnabled()));
+                actions.put(id + ":browser-back", new NativeAction("browser-back",
+                    () -> navigateBrowser(embedded, mainShell, true)));
+                actions.put(id + ":browser-forward", new NativeAction("browser-forward",
+                    () -> navigateBrowser(embedded, mainShell, false)));
+            }
             if (focusable(control, mainShell)) {
                 properties.put("operation", "focus");
             }
@@ -139,6 +148,13 @@ public final class NativeSceneInspector {
     }
 
     record NativeAction(String operation, java.util.function.BooleanSupplier perform) { }
+
+    private static boolean navigateBrowser(@NotNull Browser browser, @NotNull Shell shell, boolean back) {
+        if (!available(browser, shell) || browser.getDisplay().getActiveShell() != shell) {
+            return false;
+        }
+        return back ? browser.back() : browser.forward();
+    }
 
     private static boolean focusable(@NotNull Control control, @NotNull Shell shell) {
         return available(control, shell) && isInput(control) && (control.getStyle() & SWT.PASSWORD) == 0;
