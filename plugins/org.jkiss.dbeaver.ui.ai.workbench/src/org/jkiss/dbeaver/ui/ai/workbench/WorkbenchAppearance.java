@@ -265,11 +265,8 @@ public final class WorkbenchAppearance {
                 truncated = true;
             }
             style(control);
-            if (material) {
-                NativeWorkbenchMaterial.prepareControl(control);
-                if (control instanceof CTabFolder) {
-                    NativeWorkbenchMaterial.applyRegion(control);
-                }
+            if (material && control instanceof CTabFolder) {
+                NativeWorkbenchMaterial.applyRegion(control);
             }
             if (control instanceof Composite composite) {
                 for (Control child : composite.getChildren()) {
@@ -298,15 +295,15 @@ public final class WorkbenchAppearance {
         }
         boolean glass = WorkbenchDesign.isGlass() && NativeWorkbenchMaterial.isApplied(control.getShell());
         int surface = control instanceof AIPromptStyledText ? activePalette.raisedSurface() : activePalette.chrome();
-        Color background = surfaceColor(surface, glass);
+        Color background = color(surface);
         if (control instanceof CTabFolder folder) {
             rememberTabItems(folder);
             // Gradients style the headers; the body renderer reads the actual control background alpha.
-            folder.setBackground(background);
+            folder.setBackground(glass ? translucent(surface, WorkbenchDesign.glassOpacity()) : background);
             folder.setBackground(new Color[] {background, background},
                 new int[] {100}, true);
             folder.setForeground(color(activePalette.chromeForeground()));
-            Color selected = surfaceColor(activePalette.raisedSurface(), glass);
+            Color selected = color(activePalette.raisedSurface());
             folder.setSelectionBackground(new Color[] {selected, selected},
                 new int[] {100}, true);
             folder.setSelectionForeground(color(activePalette.chromeForeground()));
@@ -318,7 +315,7 @@ public final class WorkbenchAppearance {
                 }
             }
         } else {
-            // Retain a nonzero alpha so Cocoa uses the alpha-aware background-control paint path.
+            // Keep chrome opaque so the material underlay cannot wash out text and icons.
             control.setBackground(background);
             if (!(control instanceof StyledText) || control instanceof AIPromptStyledText) {
                 control.setForeground(color(activePalette.chromeForeground()));
@@ -520,11 +517,6 @@ public final class WorkbenchAppearance {
             throw new IllegalArgumentException("Use a supported accent name or #RRGGBB");
         }
         return normalized.toUpperCase(Locale.ROOT);
-    }
-
-    @NotNull
-    private static Color surfaceColor(int surface, boolean glass) {
-        return glass ? translucent(surface, WorkbenchDesign.glassOpacity()) : color(surface);
     }
 
     static record Palette(int accent, int selectionForeground, int chrome, int chromeForeground, boolean dark) {
