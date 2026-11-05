@@ -20,8 +20,11 @@ import org.jkiss.dbeaver.model.ai.AIFunction;
 import org.jkiss.dbeaver.model.ai.AIFunctionContext;
 import org.jkiss.dbeaver.model.ai.AIFunctionResult;
 import org.jkiss.dbeaver.model.ai.AIFunctionType;
+import org.jkiss.dbeaver.model.ai.utils.AIUtils;
+import org.jkiss.dbeaver.model.struct.DBSEntity;
 import org.jkiss.dbeaver.ui.UIUtils;
 import org.jkiss.dbeaver.ui.editors.MultiPageAbstractEditor;
+import org.jkiss.dbeaver.ui.navigator.actions.NavigatorHandlerObjectOpen;
 
 import java.io.StringReader;
 import java.util.LinkedHashMap;
@@ -32,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 /** Native destinations and confirmed execution of registered DBeaver commands. */
 public final class WorkbenchNavigationFunction implements AIFunction {
     private static final String ER_DIAGRAM = "er-diagram";
+    private static final String EMBEDDED_DIAGRAM = "org.jkiss.dbeaver.ui.editors.erd.editor.ERDEditorEmbedded";
     private static final String VIEW_DIAGRAM = "org.jkiss.dbeaver.erd.diagram.view";
 
     // Named tools live for this app session. Store command IDs only, never arguments or connection data.
@@ -58,6 +62,7 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     || destination.equals("run-tool") || destination.equals("list-tools")))) {
             throw new DBException("Choose a destination listed in the tool schema");
         }
+        var table = destination.equals(ER_DIAGRAM) ? resolveDiagramTable(context, parameters) : null;
         CompletableFuture<String> future = new CompletableFuture<>();
         Runnable action = () -> {
             if (future.isCancelled() || context.getMonitor().isCanceled()) {
@@ -153,23 +158,32 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     future.complete("Requested confirmation for " + label + ". Wait for the user and observe the result.");
                 } else if (destination.equals(ER_DIAGRAM)) {
                     var page = window.getActivePage();
-                    String navigatorId = VIEWS.get("database-navigator");
-                    var selection = window.getSelectionService().getSelection(navigatorId);
-                    if (!(selection instanceof IStructuredSelection selected) || selected.size() != 1) {
-                        throw new DBException("Select one table or table container in Database Navigator to open its diagram");
+                    if (table != null) {
+                        var node = NavigatorHandlerObjectOpen.getNodeByObject(table);
+                        if (node == null) {
+                            throw new DBException("The table could not be located in the database model");
+                        }
+                        NavigatorHandlerObjectOpen.openEntityEditor(node, EMBEDDED_DIAGRAM, null, null, window, true);
+                    } else {
+                        String navigatorId = VIEWS.get("database-navigator");
+                        var selection = window.getSelectionService().getSelection(navigatorId);
+                        if (!(selection instanceof IStructuredSelection selected) || selected.size() != 1) {
+                            throw new DBException("Select one table or table container in Database Navigator to open its diagram");
+                        }
+                        var service = window.getService(IHandlerService.class);
+                        if (service == null) {
+                            throw new DBException("Native command service unavailable");
+                        }
+                        page.activate(page.showView(navigatorId));
+                        service.executeCommand(VIEW_DIAGRAM, null);
                     }
-                    var service = window.getService(IHandlerService.class);
-                    if (service == null) {
-                        throw new DBException("Native command service unavailable");
-                    }
-                    page.activate(page.showView(navigatorId));
-                    service.executeCommand(VIEW_DIAGRAM, null);
                     var editor = page.getActiveEditor();
                     var diagram = editor instanceof MultiPageAbstractEditor multipage ? multipage.getActiveEditor() : editor;
                     if (diagram == null || !diagram.getClass().getName().startsWith("org.jkiss.dbeaver.ui.editors.erd.editor.")) {
                         throw new DBException("View Diagram returned without activating a diagram editor. Observe the workbench.");
                     }
-                    future.complete("Opened the ER diagram editor for the selected Database Navigator object.");
+                    future.complete(table == null ? "Opened the ER diagram for the selected Database Navigator object."
+                        : "Opened the ER diagram for " + table.getName() + ".");
                 } else {
                     // Complete before a modal native wizard enters its event loop.
                     var service = window.getService(IHandlerService.class);
@@ -209,6 +223,31 @@ public final class WorkbenchNavigationFunction implements AIFunction {
             future.cancel(false);
             throw new DBException("Could not open the requested workbench destination", e);
         }
+    }
+
+    @org.jkiss.code.Nullable
+    private static DBSEntity resolveDiagramTable(@NotNull AIFunctionContext context,
+        @NotNull Map<String, Object> parameters) throws DBException {
+        Object value = parameters.get("tableName");
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String name) || name.isBlank() || name.length() > 512) {
+            throw new DBException("Supply a valid table name in the chat connection");
+        }
+        var database = context.getContext();
+        if (database == null) {
+            throw new DBException("Select a database connection in chat first");
+        }
+        if (database.hasDataSourceCustomScope()) {
+            throw new DBException("A relationship diagram may include tables outside the custom chat scope");
+        }
+        var table = AIUtils.findTableInContext(context, name);
+        if (!(table instanceof DBSEntity entity)
+            || !AIUtils.isObjectInScope(database, database.getExecutionContext(), entity)) {
+            throw new DBException("The table does not support diagrams in the current chat context");
+        }
+        return entity;
     }
 
     @NotNull
