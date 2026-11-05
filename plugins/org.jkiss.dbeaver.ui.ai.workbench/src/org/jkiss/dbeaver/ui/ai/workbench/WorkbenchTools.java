@@ -92,10 +92,10 @@ final class WorkbenchTools {
                 }
             }
         }
-        NativeSceneInspector.append(graph);
+        var nativeActions = NativeSceneInspector.append(graph, window.getShell());
         var snapshot = graph.build();
         observation = new Observation(snapshot.id().toString(), snapshot.observedAt(), page, editor,
-            result, result == null ? -1 : result.getModel().getRowCount(), parts, presentations,
+            result, result == null ? -1 : result.getModel().getRowCount(), parts, presentations, nativeActions,
             new Invalidator(snapshot.id().toString()), UIUtils.getDisplay());
         if (result != null) {
             result.addListener(observation.listener());
@@ -135,6 +135,12 @@ final class WorkbenchTools {
     @NotNull
     static Map<String, Object> act(@NotNull String snapshotId, @NotNull String nodeId,
         boolean presentation) throws DBException {
+        return act(snapshotId, nodeId, presentation, "");
+    }
+
+    @NotNull
+    static Map<String, Object> act(@NotNull String snapshotId, @NotNull String nodeId,
+        boolean presentation, @NotNull String nativeOperation) throws DBException {
         Observation state = observation;
         Disclosure visible = disclosure;
         if (state == null || !state.id().equals(snapshotId)
@@ -147,7 +153,12 @@ final class WorkbenchTools {
         }
         // Consume the token before acting; failed or repeated calls must observe again.
         clearObservation();
-        if (presentation) {
+        if (!nativeOperation.isEmpty()) {
+            var action = state.nativeActions().get(nodeId);
+            if (action == null || !action.operation().equals(nativeOperation) || !action.perform().getAsBoolean()) {
+                throw new DBException("Native control unavailable or action could not be verified; observe again");
+            }
+        } else if (presentation) {
             IResultSetController current = ResultSetHandlerMain.getActiveResultSet(state.editor());
             ResultSetPresentationDescriptor descriptor = state.presentations().get(nodeId);
             if (!(current instanceof ResultSetViewer viewer) || current != state.result()
@@ -260,6 +271,7 @@ final class WorkbenchTools {
 
     private record Observation(String id, Instant time, IWorkbenchPage page, IEditorPart editor,
         IResultSetController result, int rows, Map<String, IWorkbenchPartReference> parts,
-        Map<String, ResultSetPresentationDescriptor> presentations, IResultSetListener listener, Display display) {
+        Map<String, ResultSetPresentationDescriptor> presentations,
+        Map<String, NativeSceneInspector.NativeAction> nativeActions, IResultSetListener listener, Display display) {
     }
 }

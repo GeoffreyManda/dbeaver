@@ -3,7 +3,7 @@ Bundle-ManifestVersion: 2
 Bundle-Name: %bundleName
 Bundle-Vendor: %bundleVendor
 Bundle-SymbolicName: org.jkiss.dbeaver.ui.ai.workbench;singleton:=true
-Bundle-Version: 0.2.9.qualifier
+Bundle-Version: 0.2.10.qualifier
 Bundle-Localization: plugin
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Bundle-Activator: org.jkiss.dbeaver.ui.ai.workbench.WorkbenchPlugin

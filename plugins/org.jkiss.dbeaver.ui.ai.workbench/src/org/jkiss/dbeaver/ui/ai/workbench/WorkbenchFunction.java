@@ -36,7 +36,7 @@ abstract class WorkbenchFunction implements AIFunction {
     private final Operation operation;
 
     enum Operation {
-        OBSERVE, ACTIVATE, PRESENTATION, CATALOG, APPEARANCE, DESIGN
+        OBSERVE, ACTIVATE, PRESENTATION, CATALOG, APPEARANCE, DESIGN, NATIVE_CONTROL
     }
 
     WorkbenchFunction(@NotNull Operation operation) {
@@ -50,9 +50,11 @@ abstract class WorkbenchFunction implements AIFunction {
         if (context.getMonitor().isCanceled()) {
             throw new DBException("Workbench operation canceled");
         }
-        boolean targetedAction = operation == Operation.ACTIVATE || operation == Operation.PRESENTATION;
+        boolean targetedAction = operation == Operation.ACTIVATE || operation == Operation.PRESENTATION
+            || operation == Operation.NATIVE_CONTROL;
         String snapshotId = targetedAction ? parameter(parameters, "snapshotId") : "";
         String nodeId = targetedAction ? parameter(parameters, "nodeId") : "";
+        String nativeOperation = operation == Operation.NATIVE_CONTROL ? parameter(parameters, "operation") : "";
         String query = operation == Operation.CATALOG ? parameter(parameters, "query") : "";
         String accent = operation == Operation.APPEARANCE ? parameter(parameters, "accent") : "";
         CompletableFuture<Map<String, Object>> future = new CompletableFuture<>();
@@ -64,6 +66,7 @@ abstract class WorkbenchFunction implements AIFunction {
             }
             try {
                 future.complete(switch (operation) {
+                    case NATIVE_CONTROL -> WorkbenchTools.act(snapshotId, nodeId, false, nativeOperation);
                     case OBSERVE -> WorkbenchTools.observe();
                     case CATALOG -> NativeCapabilityCatalog.query(query);
                     case APPEARANCE -> WorkbenchAppearance.apply(accent);

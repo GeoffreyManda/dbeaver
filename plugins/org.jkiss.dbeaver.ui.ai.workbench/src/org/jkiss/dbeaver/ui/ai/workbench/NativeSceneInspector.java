@@ -19,6 +19,8 @@ package org.jkiss.dbeaver.ui.ai.workbench;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
 import org.eclipse.swt.custom.CCombo;
+import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.Rectangle;
@@ -28,8 +30,11 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.DateTime;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Spinner;
+import org.eclipse.swt.widgets.TabFolder;
+import org.eclipse.swt.widgets.TabItem;
 import org.eclipse.swt.widgets.Text;
 import org.jkiss.code.NotNull;
 import org.jkiss.code.Nullable;
@@ -60,7 +65,9 @@ public final class NativeSceneInspector {
     private record Pending(Control control, String parentId, int depth) { }
 
     /** Appends metadata to a graph that already contains the workbench root. No UI actions occur. */
-    public static void append(@NotNull WorkbenchSceneGraph.Builder graph) {
+    @NotNull
+    static Map<String, NativeAction> append(@NotNull WorkbenchSceneGraph.Builder graph, @NotNull Shell mainShell) {
+        final Map<String, NativeAction> actions = new LinkedHashMap<>();
         Objects.requireNonNull(graph);
         Display display = Display.getCurrent();
         if (display == null || display.isDisposed()) {
@@ -94,11 +101,21 @@ public final class NativeSceneInspector {
             String type = control instanceof Shell ? "shell" : browser ? "browser"
                 : control instanceof Button ? "button" : input ? "input" : "control";
             Map<String, Object> properties = properties(control, input, browser);
+            if (focusable(control, mainShell)) {
+                properties.put("operation", "focus");
+            }
             if (!graph.addNode(id, type, properties)) {
                 graph.markTruncated();
                 break;
             }
             added++;
+            if (focusable(control, mainShell)) {
+                actions.put(id, new NativeAction("focus", () -> focusable(control, mainShell)
+                    && display.getActiveShell() == mainShell && control.setFocus() && control.isFocusControl()));
+            }
+            if (control instanceof TabFolder || control instanceof CTabFolder) {
+                appendTabs(graph, actions, control, mainShell, id);
+            }
             graph.addEdge(pending.parentId(), "contains", id);
             if (control.isFocusControl() || control instanceof Shell && display.getActiveShell() == control) {
                 graph.addEdge("workbench", "active", id);
@@ -117,6 +134,63 @@ public final class NativeSceneInspector {
                 }
                 queue.addLast(new Pending(child, id, pending.depth() + 1));
             }
+        }
+        return actions;
+    }
+
+    record NativeAction(String operation, java.util.function.BooleanSupplier perform) { }
+
+    private static boolean focusable(@NotNull Control control, @NotNull Shell shell) {
+        return available(control, shell) && isInput(control) && (control.getStyle() & SWT.PASSWORD) == 0;
+    }
+
+    private static boolean available(@NotNull Control control, @NotNull Shell shell) {
+        return !control.isDisposed() && control.getShell() == shell && control.isVisible() && control.isEnabled();
+    }
+
+    private static void appendTabs(@NotNull WorkbenchSceneGraph.Builder graph, @NotNull Map<String, NativeAction> actions,
+        @NotNull Control control, @NotNull Shell mainShell, @NotNull String parentId) {
+        if (!available(control, mainShell)) {
+            return;
+        }
+        int count = control instanceof TabFolder folder ? folder.getItemCount() : ((CTabFolder) control).getItemCount();
+        for (int index = 0; index < Math.min(count, 16); index++) {
+            final int target = index;
+            var item = control instanceof TabFolder folder ? folder.getItem(index) : ((CTabFolder) control).getItem(index);
+            int selection = control instanceof TabFolder folder ? folder.getSelectionIndex()
+                : ((CTabFolder) control).getSelectionIndex();
+            String id = "native-" + ++sequence;
+            if (!graph.addNode(id, "tab", Map.of("index", index, "selected", index == selection,
+                "operation", "select-tab"))) {
+                graph.markTruncated();
+                break;
+            }
+            graph.addEdge(parentId, "contains", id);
+            actions.put(id, new NativeAction("select-tab", () -> {
+                if (!available(control, mainShell) || control.getDisplay().getActiveShell() != mainShell
+                    || item.isDisposed()) {
+                    return false;
+                }
+                if (control instanceof TabFolder folder && item instanceof TabItem tab) {
+                    if (folder.indexOf(tab) != target) {
+                        return false;
+                    }
+                    folder.setSelection(tab);
+                } else if (control instanceof CTabFolder folder && item instanceof CTabItem tab) {
+                    if (folder.indexOf(tab) != target) {
+                        return false;
+                    }
+                    folder.setSelection(tab);
+                }
+                Event event = new Event();
+                event.item = item;
+                control.notifyListeners(SWT.Selection, event);
+                return available(control, mainShell) && (control instanceof TabFolder folder
+                    ? folder.getSelectionIndex() : ((CTabFolder) control).getSelectionIndex()) == target;
+            }));
+        }
+        if (count > 16) {
+            graph.markTruncated();
         }
     }
 

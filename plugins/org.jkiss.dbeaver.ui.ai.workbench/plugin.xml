@@ -19,6 +19,12 @@
             <parameter name="snapshotId" required="true" type="string" description="Exact snapshot ID from observeWorkbench"/>
             <parameter name="nodeId" required="true" type="string" description="Exact editor or view node ID from that snapshot"/>
         </function>
+        <function id="actOnNativeControl" name="%nativeControl.name" class="org.jkiss.dbeaver.ui.ai.workbench.ActOnNativeControlFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
+            description="Operate a visible native SWT control from observeWorkbench. Focus an enabled non-password input in the active main window, or select a native tab node by index. Returns fresh observed state after verifying the change. Dialogs and embedded browsers are excluded.">
+            <parameter name="snapshotId" required="true" type="string" description="Exact snapshot ID from observeWorkbench"/>
+            <parameter name="nodeId" required="true" type="string" description="Exact native input or tab node ID"/>
+            <parameter name="operation" required="true" type="string" description="focus or select-tab"/>
+        </function>
         <function id="selectResultPresentation" name="%presentation.name" class="org.jkiss.dbeaver.ui.ai.workbench.SelectResultPresentationFunction" categoryId="workbench.display" type="ACTION" purpose="TOOL" ui="true" enabledByDefault="true" defaultAllowMode="ASK"
             description="Select an already available presentation of the observed fetched result. Does not fetch rows, execute SQL, convert geometry or change CRS. Returns fresh state, not a claim of visual verification.">
             <parameter name="snapshotId" required="true" type="string" description="Exact snapshot ID from observeWorkbench"/>
