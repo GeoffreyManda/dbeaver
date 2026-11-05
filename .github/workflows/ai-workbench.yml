@@ -1,0 +1,72 @@
+name: AI Workbench addon
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'plugins/org.jkiss.dbeaver.ui.ai.workbench/**'
+      - 'scripts/build-workbench-tools.py'
+      - 'scripts/install-workbench-tools.py'
+      - 'scripts/check-workbench-style.py'
+      - 'scripts/checkstyle.xml'
+      - 'plugins/org.jkiss.dbeaver.ui.ai/src/**'
+      - 'plugins/org.jkiss.dbeaver.model.ai/src/**'
+      - '.github/workflows/ai-workbench.yml'
+  pull_request:
+    paths:
+      - 'plugins/org.jkiss.dbeaver.ui.ai.workbench/**'
+      - 'scripts/build-workbench-tools.py'
+      - 'scripts/install-workbench-tools.py'
+      - 'scripts/check-workbench-style.py'
+      - 'scripts/checkstyle.xml'
+      - 'plugins/org.jkiss.dbeaver.ui.ai/src/**'
+      - 'plugins/org.jkiss.dbeaver.model.ai/src/**'
+      - '.github/workflows/ai-workbench.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ai-workbench-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  addon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            plugins/org.jkiss.dbeaver.ui.ai.workbench
+            scripts/build-workbench-tools.py
+            scripts/install-workbench-tools.py
+            scripts/check-workbench-style.py
+            scripts/checkstyle.xml
+            plugins/org.jkiss.dbeaver.ui.ai/src
+            plugins/org.jkiss.dbeaver.model.ai/src
+            docs
+            LICENSE.md
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check source style before building
+        run: python3 scripts/check-workbench-style.py --cache "$RUNNER_TEMP/dbeaver-checkstyle"
+      - name: Compile and test against official Community APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_api_dir="$(mktemp -d "$RUNNER_TEMP/dbeaver-workbench.XXXXXX")"
+          trap 'rm -rf "$task_api_dir"' EXIT
+          curl --fail --location --max-time 120 --retry 2 \
+            https://github.com/dbeaver/dbeaver/releases/download/26.2.4/dbeaver-ce-26.2.4-linux-x86_64.tar.gz \
+            --output "$task_api_dir/app.tar.gz"
+          echo 'a0dce46bb01cd2447c2d51388a39d3cda7ac58930fc558ebf3945aca5b859360  '"$task_api_dir/app.tar.gz" | sha256sum --check
+          tar -xzf "$task_api_dir/app.tar.gz" -C "$task_api_dir"
+          rm "$task_api_dir/app.tar.gz"
+          python3 scripts/build-workbench-tools.py --app "$task_api_dir/dbeaver"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-workbench-addon
+          path: |
+            plugins/org.jkiss.dbeaver.ui.ai.workbench/target/*.jar
+            plugins/org.jkiss.dbeaver.ui.ai.workbench/target/workbench-theme-api.zip
+          retention-days: 3
+          if-no-files-found: error
