@@ -5,6 +5,11 @@
  */
 package org.jkiss.dbeaver.ui.ai.workbench;
 
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import org.eclipse.core.commands.Command;
+import org.eclipse.core.commands.ParameterizedCommand;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.ui.commands.ICommandService;
@@ -17,6 +22,8 @@ import org.jkiss.dbeaver.model.ai.AIFunctionResult;
 import org.jkiss.dbeaver.model.ai.AIFunctionType;
 import org.jkiss.dbeaver.ui.UIUtils;
 
+import java.io.StringReader;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +48,8 @@ public final class WorkbenchNavigationFunction implements AIFunction {
         Object value = parameters.get("destination");
         if (!(value instanceof String destination) ||
             !(VIEWS.containsKey(destination) || destination.equals("preferences")
-                || destination.equals("new-connection") || destination.equals(ER_DIAGRAM) || destination.equals("registered-command"))) {
+                || destination.equals("new-connection") || destination.equals(ER_DIAGRAM) || (destination.equals("registered-command")
+                    || destination.equals("inspect-command")))) {
             throw new DBException("Choose a destination listed in the tool schema");
         }
         CompletableFuture<String> future = new CompletableFuture<>();
@@ -58,7 +66,7 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                 if (VIEWS.containsKey(destination)) {
                     window.getActivePage().showView(VIEWS.get(destination));
                     future.complete("Opened " + destination.replace('-', ' ') + ".");
-                } else if (destination.equals("registered-command")) {
+                } else if (destination.equals("registered-command") || destination.equals("inspect-command")) {
                     if (!(commandId instanceof String id) || !id.matches("org\\.jkiss\\.dbeaver\\.[A-Za-z0-9_.-]{1,100}")) {
                         throw new DBException("Supply an exact DBeaver command ID from capability search");
                     }
@@ -68,9 +76,28 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                         throw new DBException("Native command service unavailable");
                     }
                     var command = commands.getCommand(id);
-                    if (!command.isDefined() || !command.isHandled() || !command.isEnabled()
-                        || command.getParameters() != null && command.getParameters().length != 0) {
-                        throw new DBException("The command is unavailable in the current selection or needs a dedicated parameter adapter");
+                    if (!command.isDefined()) {
+                        throw new DBException("This DBeaver command is not registered");
+                    }
+                    if (destination.equals("inspect-command")) {
+                        future.complete(describe(command));
+                        return;
+                    }
+                    if (!command.isHandled() || !command.isEnabled()) {
+                        throw new DBException("The command is unavailable in the current selection");
+                    }
+                    var arguments = parseArguments(parameters.get("commandArguments"));
+                    var declared = command.getParameters();
+                    if (declared != null) {
+                        for (var parameter : declared) {
+                            if (!parameter.isOptional() && !arguments.containsKey(parameter.getId())) {
+                                throw new DBException("Missing command parameter: " + parameter.getId());
+                            }
+                        }
+                    }
+                    var bound = ParameterizedCommand.generateCommand(command, arguments);
+                    if (bound == null || !bound.getParameterMap().equals(arguments)) {
+                        throw new DBException("Command arguments do not match the declared parameters");
                     }
                     var page = window.getActivePage();
                     var part = page.getActivePart();
@@ -78,7 +105,8 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     String label = command.getName();
                     UIUtils.asyncExec(() -> {
                         if (window.getShell().isDisposed() || !MessageDialog.openConfirm(window.getShell(),
-                            "Run DBeaver command", label + "\n" + id + "\n\nRun against the current workbench selection?")) {
+                            "Run DBeaver command", label + "\n" + id + "\n" + arguments
+                                + "\n\nRun against the current workbench selection?")) {
                             return;
                         }
                         try {
@@ -87,7 +115,7 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                                 || !command.isEnabled()) {
                                 throw new DBException("The workbench context changed. Request the command again.");
                             }
-                            handlers.executeCommand(id, null);
+                            handlers.executeCommand(bound, null);
                         } catch (Exception e) {
                             org.jkiss.dbeaver.runtime.DBWorkbench.getPlatformUI().showError(
                                 "Command failed", "Could not run " + label, e);
@@ -147,5 +175,55 @@ public final class WorkbenchNavigationFunction implements AIFunction {
             future.cancel(false);
             throw new DBException("Could not open the requested workbench destination", e);
         }
+    }
+
+    @NotNull
+    private static String describe(@NotNull Command command) throws Exception {
+        var result = new StringBuilder(command.getId()).append(": ").append(command.getName())
+            .append("; enabled=").append(command.isEnabled()).append("; handled=").append(command.isHandled());
+        var declared = command.getParameters();
+        if (declared != null) {
+            for (var parameter : declared) {
+                result.append("\n").append(parameter.getId()).append(" (").append(parameter.getName())
+                    .append(parameter.isOptional() ? ", optional)" : ", required)");
+                if (result.length() > 4000) {
+                    return result.substring(0, 4000) + "…";
+                }
+            }
+        }
+        return result.toString();
+    }
+
+    @NotNull
+    private static Map<String, String> parseArguments(@org.jkiss.code.Nullable Object raw) throws DBException {
+        if (raw == null) {
+            return Map.of();
+        }
+        if (!(raw instanceof String json) || json.length() > 4096) {
+            throw new DBException("Command arguments must be a JSON object of strings, at most 4096 characters");
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        try (var reader = new JsonReader(new StringReader(json))) {
+            reader.setStrictness(Strictness.STRICT);
+            reader.beginObject();
+            while (reader.hasNext()) {
+                String key = reader.nextName();
+                if (result.size() == 16 || reader.peek() != JsonToken.STRING || result.containsKey(key)) {
+                    throw new DBException("Use at most 16 distinct command parameters with string values");
+                }
+                String value = reader.nextString();
+                if (value.length() > 512 || value.chars().anyMatch(Character::isISOControl)) {
+                    throw new DBException("Command values must be single-line strings of at most 512 characters");
+                }
+                result.put(key, value);
+            }
+            reader.endObject();
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw new DBException("Supply exactly one JSON object");
+            }
+        } catch (java.io.IOException | IllegalStateException e) {
+            throw new DBException("Invalid command arguments JSON", e);
+        }
+        return result;
     }
 }
