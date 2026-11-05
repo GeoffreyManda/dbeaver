@@ -62,6 +62,10 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                     || destination.equals("run-tool") || destination.equals("list-tools")))) {
             throw new DBException("Choose a destination listed in the tool schema");
         }
+        var workflow = WorkbenchWorkflow.dispatch(this, context, destination, parameters);
+        if (workflow != null) {
+            return workflow;
+        }
         var table = destination.equals(ER_DIAGRAM) ? resolveDiagramTable(context, parameters) : null;
         CompletableFuture<String> future = new CompletableFuture<>();
         Runnable action = () -> {
@@ -77,7 +81,7 @@ public final class WorkbenchNavigationFunction implements AIFunction {
                 boolean runRecipe = destination.equals("run-tool");
                 boolean createRecipe = destination.equals("create-tool");
                 if (destination.equals("list-tools")) {
-                    future.complete(RECIPES.toString());
+                    future.complete("Saved workflows: " + WorkbenchWorkflow.names() + "; session command tools: " + RECIPES);
                     return;
                 }
                 String recipe = "";

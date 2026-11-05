@@ -74,45 +74,17 @@ final class WorkbenchThemeIntegration {
 
     @NotNull
     static Map<String, String> colors(@NotNull WorkbenchAppearance.Palette palette) {
-        int background = palette.chrome();
-        int inactive = mix(background, palette.dark() ? 0 : 0xFFFFFF, 0.07);
-        int foreground = palette.chromeForeground();
-        int link = palette.accent();
-        for (int step = 0; step < 32 && (WorkbenchAppearance.contrast(background, link) < 4.5
-            || WorkbenchAppearance.contrast(inactive, link) < 4.5); step++) {
-            link = mix(link, foreground, 0.15);
-        }
-        if (WorkbenchAppearance.contrast(background, link) < 4.5 || WorkbenchAppearance.contrast(inactive, link) < 4.5) {
-            link = foreground;
-        }
         Map<String, String> values = new LinkedHashMap<>();
-        values.put("BACKGROUND_COLOR", hex(background));
-        values.put("BACKGROUND_COLOR_INACTIVE", hex(inactive));
-        values.put("TEXT_COLOR", hex(foreground));
-        values.put("PROMPT_BACKGROUND", hex(inactive));
-        values.put("PROMPT_BORDER", hex(link));
-        values.put("HYPERLINK_COLOR", hex(link));
-        values.put("BORDER_COLOR", hex(link));
-        values.put("WARNING_BACKGROUND", hex(readableSurface(mix(background, 0xE5A000, 0.15), foreground)));
-        values.put("ERROR_BACKGROUND", hex(readableSurface(mix(background, 0xCC3333, 0.15), foreground)));
+        values.put("BACKGROUND_COLOR", hex(palette.chrome()));
+        values.put("BACKGROUND_COLOR_INACTIVE", hex(palette.raisedSurface()));
+        values.put("TEXT_COLOR", hex(palette.chromeForeground()));
+        values.put("PROMPT_BACKGROUND", hex(palette.raisedSurface()));
+        values.put("PROMPT_BORDER", hex(palette.focus()));
+        values.put("HYPERLINK_COLOR", hex(palette.focus()));
+        values.put("BORDER_COLOR", hex(palette.focus()));
+        values.put("WARNING_BACKGROUND", hex(palette.warningSurface()));
+        values.put("ERROR_BACKGROUND", hex(palette.errorSurface()));
         return Map.copyOf(values);
-    }
-
-    private static int readableSurface(int color, int foreground) {
-        int endpoint = foreground == 0 ? 0xFFFFFF : 0;
-        for (int step = 0; step < 32 && WorkbenchAppearance.contrast(color, foreground) < 4.5; step++) {
-            color = mix(color, endpoint, 0.08);
-        }
-        return WorkbenchAppearance.contrast(color, foreground) >= 4.5 ? color : endpoint;
-    }
-
-    private static int mix(int first, int second, double amount) {
-        int rgb = 0;
-        for (int shift : new int[] {16, 8, 0}) {
-            int channel = (int) Math.round((first >>> shift & 255) * (1 - amount) + (second >>> shift & 255) * amount);
-            rgb |= channel << shift;
-        }
-        return rgb;
     }
 
     @NotNull

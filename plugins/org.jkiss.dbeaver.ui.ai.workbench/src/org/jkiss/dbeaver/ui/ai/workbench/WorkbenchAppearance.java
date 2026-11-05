@@ -70,7 +70,7 @@ public final class WorkbenchAppearance {
         CTabFolder folder = (CTabFolder) event.widget;
         if (activePalette != null && folder.getSelection() != null) {
             var bounds = folder.getSelection().getBounds();
-            event.gc.setBackground(color(activePalette.accent()));
+            event.gc.setBackground(color(activePalette.focus()));
             event.gc.fillRectangle(bounds.x, bounds.y + bounds.height - 2, bounds.width, 2);
         }
     };
@@ -297,8 +297,8 @@ public final class WorkbenchAppearance {
             }
         }
         boolean glass = WorkbenchDesign.isGlass() && NativeWorkbenchMaterial.isApplied(control.getShell());
-        Color background = glass ? translucent(activePalette.chrome(), WorkbenchDesign.glassOpacity())
-            : color(activePalette.chrome());
+        int surface = control instanceof AIPromptStyledText ? activePalette.raisedSurface() : activePalette.chrome();
+        Color background = surfaceColor(surface, glass);
         if (control instanceof CTabFolder folder) {
             rememberTabItems(folder);
             // Gradients style the headers; the body renderer reads the actual control background alpha.
@@ -306,7 +306,8 @@ public final class WorkbenchAppearance {
             folder.setBackground(new Color[] {background, background},
                 new int[] {100}, true);
             folder.setForeground(color(activePalette.chromeForeground()));
-            folder.setSelectionBackground(new Color[] {background, background},
+            Color selected = surfaceColor(activePalette.raisedSurface(), glass);
+            folder.setSelectionBackground(new Color[] {selected, selected},
                 new int[] {100}, true);
             folder.setSelectionForeground(color(activePalette.chromeForeground()));
             WorkbenchTabMaterial.apply(folder, glass);
@@ -521,7 +522,39 @@ public final class WorkbenchAppearance {
         return normalized.toUpperCase(Locale.ROOT);
     }
 
+    @NotNull
+    private static Color surfaceColor(int surface, boolean glass) {
+        return glass ? translucent(surface, WorkbenchDesign.glassOpacity()) : color(surface);
+    }
+
     static record Palette(int accent, int selectionForeground, int chrome, int chromeForeground, boolean dark) {
+        int raisedSurface() {
+            return mix(dark ? 0x000000 : 0xFFFFFF, chrome, 0.07);
+        }
+
+        int focus() {
+            int focus = accent;
+            for (int step = 0; step < 32; step++) {
+                if (contrast(chrome, focus) >= 4.5 && contrast(raisedSurface(), focus) >= 4.5) {
+                    return focus;
+                }
+                focus = mix(chromeForeground, focus, 0.15);
+            }
+            return chromeForeground;
+        }
+
+        int warningSurface() {
+            return statusSurface(0xE5A000);
+        }
+
+        int errorSurface() {
+            return statusSurface(0xCC3333);
+        }
+
+        private int statusSurface(int tone) {
+            int tinted = mix(tone, chrome, 0.15);
+            return contrast(tinted, chromeForeground) >= 4.5 ? tinted : chrome;
+        }
     }
 
     @NotNull
